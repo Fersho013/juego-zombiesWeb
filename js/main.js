@@ -85,6 +85,7 @@ function init3DWorld() {
 
         function stepGame(fixedDelta) {
             frameDelta = Math.min(0.1, fixedDelta);
+            if (typeof updateNoises === 'function') updateNoises(fixedDelta);
             updateSurvivorAI(fixedDelta);
             updateZombieAI(fixedDelta);
             if (typeof separateEntities === 'function') separateEntities();
