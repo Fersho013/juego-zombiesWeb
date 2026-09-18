@@ -87,6 +87,7 @@ function init3DWorld() {
             frameDelta = Math.min(0.1, fixedDelta);
             updateSurvivorAI(fixedDelta);
             updateZombieAI(fixedDelta);
+            if (typeof separateEntities === 'function') separateEntities();
             updateProjectiles(fixedDelta);
             if (typeof updateAirSupport === 'function') updateAirSupport(fixedDelta);
             if (typeof updateTowerBars === 'function') updateTowerBars();
