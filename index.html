@@ -1,0 +1,2118 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Survivors VS Zombies 3D - Spectator AI Simulator</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700;800;900&display=swap" rel="stylesheet">
+    <!-- Three.js Engine -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <!-- OrbitControls -->
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <!-- Tone.js Sound Engine -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
+
+    <style>
+        body {
+            font-family: 'Outfit', sans-serif;
+            user-select: none;
+            overflow: hidden;
+            background-color: #050811;
+        }
+        ::-webkit-scrollbar {
+            width: 4px;
+        }
+        ::-webkit-scrollbar-track {
+            background: rgba(15, 23, 42, 0.6);
+        }
+        ::-webkit-scrollbar-thumb {
+            background: rgba(239, 68, 68, 0.5);
+            border-radius: 4px;
+        }
+        .glass-panel {
+            background: rgba(10, 15, 29, 0.82);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        .glass-panel-danger {
+            background: rgba(24, 9, 15, 0.85);
+            backdrop-filter: blur(16px);
+            border: 1px solid rgba(239, 68, 68, 0.3);
+        }
+        .thought-bubble {
+            position: absolute;
+            transform: translate(-50%, -100%);
+            pointer-events: none;
+            transition: transform 0.1s ease-out, opacity 0.2s ease;
+        }
+        @keyframes pulseAlert {
+            0%, 100% { opacity: 0.8; transform: scale(1); }
+            50% { opacity: 1; transform: scale(1.06); }
+        }
+        .pulse-alert {
+            animation: pulseAlert 1.5s infinite ease-in-out;
+        }
+        @keyframes scanline {
+            0% { transform: translateY(-100%); }
+            100% { transform: translateY(1000%); }
+        }
+        .scanline-effect {
+            position: absolute;
+            top: 0; left: 0; right: 0; height: 2px;
+            background: rgba(239, 68, 68, 0.25);
+            animation: scanline 8s linear infinite;
+            pointer-events: none;
+        }
+    </style>
+</head>
+<body class="text-slate-100 h-screen w-screen relative">
+
+    <!-- 3D Render Canvas -->
+    <div id="canvas-container" class="w-full h-full absolute inset-0 z-0"></div>
+    <div class="scanline-effect z-10"></div>
+
+    <!-- Speech & Action Bubbles Layer -->
+    <div id="thought-bubbles-container" class="absolute inset-0 pointer-events-none z-10"></div>
+
+    <!-- UI Header -->
+    <header class="absolute top-3 left-3 right-3 z-20 flex flex-wrap justify-between items-center gap-3 pointer-events-none">
+        <!-- Title & Wave Overview -->
+        <div class="glass-panel px-4 py-2.5 rounded-2xl flex items-center gap-3 pointer-events-auto shadow-2xl border-red-500/30">
+            <div class="flex items-center gap-2.5">
+                <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-red-600 via-amber-600 to-yellow-500 flex items-center justify-center text-slate-950 shadow-lg pulse-alert">
+                    <i class="fa-solid fa-biohazard text-xl"></i>
+                </div>
+                <div>
+                    <h1 class="font-black text-base tracking-wider bg-gradient-to-r from-red-400 via-amber-300 to-yellow-400 bg-clip-text text-transparent">
+                        SURVIVORS VS ZOMBIES 3D
+                    </h1>
+                    <p class="text-[11px] text-slate-400 font-medium">Simulador Espectador IA &bull; Oleadas Infinitas</p>
+                </div>
+            </div>
+
+            <div class="h-8 w-px bg-slate-700/80 mx-1"></div>
+
+            <!-- Wave & Timer Display -->
+            <div class="flex items-center gap-3 text-xs">
+                <div class="flex items-center gap-1.5 text-amber-300 font-extrabold bg-amber-500/10 px-3 py-1.5 rounded-xl border border-amber-500/30">
+                    <i class="fa-solid fa-layer-group text-amber-400"></i>
+                    <span>OLEADA <span id="wave-number-display" class="text-amber-200 text-sm">1</span></span>
+                </div>
+
+                <div class="flex items-center gap-1.5 font-bold px-3 py-1.5 rounded-xl border transition-colors duration-300" id="phase-badge">
+                    <i id="phase-icon" class="fa-solid fa-clock text-cyan-400"></i>
+                    <span id="phase-text" class="text-cyan-300">Búsqueda (03:00)</span>
+                </div>
+
+                <div class="flex items-center gap-1.5 text-rose-300 font-extrabold bg-rose-500/10 px-3 py-1.5 rounded-xl border border-rose-500/30">
+                    <i class="fa-solid fa-skull text-rose-500 animate-pulse"></i>
+                    <span>Zombies: <span id="zombie-count-display" class="text-rose-200">0 / 50</span></span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Speed & Camera Controls -->
+        <div class="glass-panel px-3.5 py-2 rounded-2xl flex items-center gap-2 pointer-events-auto shadow-2xl">
+            <!-- Force Skip Wave Prep Button -->
+            <button id="btn-force-wave" onclick="forceStartWave()" class="px-3 py-1.5 rounded-xl bg-gradient-to-r from-red-600 to-amber-600 hover:from-red-500 hover:to-amber-500 text-white font-bold text-xs transition flex items-center gap-1.5 shadow-lg">
+                <i class="fa-solid fa-forward-step"></i> Iniciar Oleada
+            </button>
+
+            <div class="h-6 w-px bg-slate-700 mx-1"></div>
+
+            <span class="text-[11px] uppercase tracking-wider text-slate-400 font-bold px-1 hidden md:inline">Velocidad:</span>
+            <button onclick="setSpeed(0)" id="btn-speed-0" class="w-8 h-8 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 transition flex items-center justify-center font-bold text-xs" title="Pausa">
+                <i class="fa-solid fa-pause"></i>
+            </button>
+            <button onclick="setSpeed(1)" id="btn-speed-1" class="w-8 h-8 rounded-xl bg-red-600 hover:bg-red-500 text-white transition flex items-center justify-center font-bold text-xs" title="Normal 1x">
+                1x
+            </button>
+            <button onclick="setSpeed(2)" id="btn-speed-2" class="w-8 h-8 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 transition flex items-center justify-center font-bold text-xs" title="Rápido 2x">
+                2x
+            </button>
+            <button onclick="setSpeed(5)" id="btn-speed-5" class="w-8 h-8 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 transition flex items-center justify-center font-bold text-xs" title="Ultra 5x">
+                5x
+            </button>
+
+            <div class="h-6 w-px bg-slate-700 mx-1"></div>
+
+            <span class="text-[11px] uppercase tracking-wider text-slate-400 font-bold px-1 hidden md:inline">Cámara:</span>
+            <button onclick="setCameraMode('orbit')" id="btn-cam-orbit" class="px-2.5 py-1.5 rounded-xl bg-red-600/30 text-red-300 border border-red-500/40 text-xs font-semibold transition flex items-center gap-1">
+                <i class="fa-solid fa-globe"></i> Libre
+            </button>
+            <button onclick="setCameraMode('base')" id="btn-cam-base" class="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-300 transition flex items-center gap-1">
+                <i class="fa-solid fa-shield-halved"></i> Refugio
+            </button>
+            <button onclick="setCameraMode('follow')" id="btn-cam-follow" class="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-300 transition flex items-center gap-1">
+                <i class="fa-solid fa-person"></i> Seguir
+            </button>
+        </div>
+    </header>
+
+    <!-- Left Sidebar: Spectator Interventions & Base Info -->
+    <aside class="absolute left-3 top-20 bottom-4 w-16 md:w-64 glass-panel rounded-3xl p-3 z-20 flex flex-col justify-between overflow-y-auto">
+        <div>
+            <h2 class="text-[11px] font-extrabold uppercase tracking-wider text-red-400 mb-2.5 hidden md:flex items-center justify-between">
+                <span><i class="fa-solid fa-hand-holding-hand mr-1"></i> Intervenciones</span>
+                <span class="text-[10px] text-slate-500">Apoyo Divino</span>
+            </h2>
+
+            <div class="space-y-1.5">
+                <!-- Drop Weapon Crate -->
+                <button onclick="triggerIntervention('airdrop')" class="w-full p-2 rounded-2xl bg-slate-900/80 hover:bg-amber-600/30 border border-slate-700/80 hover:border-amber-500/50 transition flex items-center gap-2.5 text-left group">
+                    <div class="w-8 h-8 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center shrink-0 group-hover:scale-110 transition">
+                        <i class="fa-solid fa-box-open"></i>
+                    </div>
+                    <div class="hidden md:block">
+                        <div class="text-xs font-bold text-slate-200">Lanzar Suministro</div>
+                        <div class="text-[10px] text-slate-400">Caja con Armas / Curas</div>
+                    </div>
+                </button>
+
+                <!-- Orbital Bombardment -->
+                <button onclick="triggerIntervention('artillery')" class="w-full p-2 rounded-2xl bg-slate-900/80 hover:bg-red-600/30 border border-slate-700/80 hover:border-red-500/50 transition flex items-center gap-2.5 text-left group">
+                    <div class="w-8 h-8 rounded-xl bg-red-500/20 text-red-400 flex items-center justify-center shrink-0 group-hover:scale-110 transition">
+                        <i class="fa-solid fa-explosion"></i>
+                    </div>
+                    <div class="hidden md:block">
+                        <div class="text-xs font-bold text-slate-200">Ataque de Artillería</div>
+                        <div class="text-[10px] text-slate-400">Bombardea Horda Zombie</div>
+                    </div>
+                </button>
+
+                <!-- Adrenaline Rally -->
+                <button onclick="triggerIntervention('adrenaline')" class="w-full p-2 rounded-2xl bg-slate-900/80 hover:bg-emerald-600/30 border border-slate-700/80 hover:border-emerald-500/50 transition flex items-center gap-2.5 text-left group">
+                    <div class="w-8 h-8 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0 group-hover:scale-110 transition">
+                        <i class="fa-solid fa-bolt"></i>
+                    </div>
+                    <div class="hidden md:block">
+                        <div class="text-xs font-bold text-slate-200">Inyección Adrenalina</div>
+                        <div class="text-[10px] text-slate-400">Cura & Vel. Movimiento</div>
+                    </div>
+                </button>
+
+                <!-- Quick Wall Fortification -->
+                <button onclick="triggerIntervention('barricade')" class="w-full p-2 rounded-2xl bg-slate-900/80 hover:bg-sky-600/30 border border-slate-700/80 hover:border-sky-500/50 transition flex items-center gap-2.5 text-left group">
+                    <div class="w-8 h-8 rounded-xl bg-sky-500/20 text-sky-400 flex items-center justify-center shrink-0 group-hover:scale-110 transition">
+                        <i class="fa-solid fa-cubes-stacked"></i>
+                    </div>
+                    <div class="hidden md:block">
+                        <div class="text-xs font-bold text-slate-200">Barricada Refuerzo</div>
+                        <div class="text-[10px] text-slate-400">Crea muro de apoyo</div>
+                    </div>
+                </button>
+            </div>
+
+            <!-- Refugios Activos (soporta múltiples refugios simultáneos) -->
+            <div class="hidden md:block mt-3 border-t border-slate-800 pt-2.5">
+                <h3 class="text-[10px] font-extrabold uppercase tracking-wider text-amber-400 mb-2 flex items-center justify-between">
+                    <span><i class="fa-solid fa-campground mr-1"></i> Refugios Activos</span>
+                    <span id="shelters-count-badge" class="text-[10px] text-cyan-300 font-bold">1</span>
+                </h3>
+
+                <div id="shelters-panel-container" class="space-y-2">
+                    <!-- Populado vía JS: una tarjeta por refugio activo -->
+                </div>
+
+                <div class="grid grid-cols-2 gap-1 text-[10px] pt-2 mt-2 border-t border-slate-800/80">
+                    <div class="text-slate-400">Cajas Munición: <span id="res-ammo-val" class="font-bold text-amber-300">0</span></div>
+                    <div class="text-slate-400">Cajas Curas: <span id="res-med-val" class="font-bold text-emerald-300">0</span></div>
+                    <div class="text-slate-400">Cajas Comida: <span id="res-food-val" class="font-bold text-orange-300">0</span></div>
+                    <div class="text-slate-400">Armas Armería: <span id="res-heavy-val" class="font-bold text-red-300">0</span></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Live Event Log -->
+        <div class="hidden md:block mt-2 border-t border-slate-800 pt-2">
+            <h3 class="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1 flex items-center justify-between">
+                <span>Bitácora IA</span>
+                <i class="fa-solid fa-radar text-red-400 animate-pulse"></i>
+            </h3>
+            <div id="sim-log-container" class="h-32 overflow-y-auto space-y-1 text-[10px] font-mono text-slate-300 pr-1 leading-tight">
+                <div class="text-slate-500 italic">Iniciando simulación de supervivencia...</div>
+            </div>
+        </div>
+    </aside>
+
+    <!-- Right Sidebar: 5 Survivors Roster & Inspector -->
+    <aside class="absolute right-3 top-20 bottom-4 w-80 glass-panel rounded-3xl p-4 z-20 flex flex-col justify-between overflow-y-auto shadow-2xl">
+        <div>
+            <!-- Survivors Tabs Selector -->
+            <div class="flex items-center justify-between mb-2">
+                <span class="text-[11px] font-extrabold uppercase tracking-wider text-slate-400">Grupo Supervivientes (5)</span>
+                <span class="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 font-extrabold border border-emerald-500/30">IA Activa</span>
+            </div>
+
+            <!-- 5 Survivor Avatars Grid -->
+            <div id="survivor-selector-list" class="grid grid-cols-5 gap-1.5 mb-3">
+                <!-- Populated via JS -->
+            </div>
+
+            <!-- Active Survivor Details Card -->
+            <div class="bg-slate-900/80 rounded-2xl p-3 border border-slate-800 mb-3 shadow-inner">
+                <div class="flex items-center gap-3">
+                    <div id="survivor-avatar-icon" class="w-11 h-11 rounded-2xl bg-gradient-to-tr from-amber-500 to-red-600 flex items-center justify-center text-lg font-black text-slate-950 shadow-lg shrink-0">
+                        S
+                    </div>
+                    <div class="flex-1 overflow-hidden">
+                        <div class="flex items-center justify-between gap-1">
+                            <h3 id="survivor-name-display" class="font-extrabold text-sm truncate text-slate-100">Cargando...</h3>
+                            <span id="survivor-role-badge" class="text-[9px] px-2 py-0.5 rounded-full bg-red-500/20 text-red-300 font-extrabold border border-red-500/30 shrink-0">
+                                Líder
+                            </span>
+                        </div>
+                        <p id="survivor-weapon-display" class="text-[11px] text-amber-400 font-bold truncate">Arma: Pistola 9mm</p>
+                        <p id="survivor-state-display" class="text-[10px] text-slate-300 truncate italic mt-0.5">Buscando recursos...</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Survivor Stats Bars -->
+            <div class="space-y-2 mb-3">
+                <h4 class="text-[10px] font-bold uppercase tracking-wider text-slate-400 flex items-center justify-between">
+                    <span>Estadísticas Vitae</span>
+                    <i class="fa-solid fa-heart-pulse text-red-400"></i>
+                </h4>
+
+                <!-- Health Bar -->
+                <div>
+                    <div class="flex justify-between text-[11px] mb-0.5">
+                        <span class="text-slate-300 flex items-center gap-1.5"><i class="fa-solid fa-heart text-red-500 w-3.5"></i> Salud</span>
+                        <span id="val-health" class="font-bold text-slate-200">100 / 100</span>
+                    </div>
+                    <div class="w-full h-1.5 rounded-full bg-slate-800 overflow-hidden">
+                        <div id="bar-health" class="h-full bg-emerald-500 transition-all duration-300" style="width: 100%"></div>
+                    </div>
+                </div>
+
+                <!-- Stamina Bar -->
+                <div>
+                    <div class="flex justify-between text-[11px] mb-0.5">
+                        <span class="text-slate-300 flex items-center gap-1.5"><i class="fa-solid fa-bolt text-yellow-400 w-3.5"></i> Energía</span>
+                        <span id="val-stamina" class="font-bold text-slate-200">100%</span>
+                    </div>
+                    <div class="w-full h-1.5 rounded-full bg-slate-800 overflow-hidden">
+                        <div id="bar-stamina" class="h-full bg-amber-500 transition-all duration-300" style="width: 100%"></div>
+                    </div>
+                </div>
+
+                <!-- Ammo Reserve -->
+                <div>
+                    <div class="flex justify-between text-[11px] mb-0.5">
+                        <span class="text-slate-300 flex items-center gap-1.5"><i class="fa-solid fa-gun text-amber-400 w-3.5"></i> Munición Cadencia</span>
+                        <span id="val-ammo" class="font-bold text-slate-200">30 / 120</span>
+                    </div>
+                    <div class="w-full h-1.5 rounded-full bg-slate-800 overflow-hidden">
+                        <div id="bar-ammo" class="h-full bg-cyan-500 transition-all duration-300" style="width: 75%"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Arsenal & Carried Crate Loadout -->
+            <div class="border-t border-slate-800 pt-2.5 mb-2">
+                <h4 class="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">Equipo & Cargamento:</h4>
+                <div class="grid grid-cols-2 gap-1.5 text-xs">
+                    <div class="p-2 rounded-xl bg-slate-900/80 border border-slate-800 flex items-center gap-2">
+                        <i class="fa-solid fa-shield-cat text-amber-400 text-sm"></i>
+                        <div>
+                            <div class="text-[9px] text-slate-400">Arma Melee</div>
+                            <div id="survivor-melee-val" class="font-bold text-slate-200 text-[11px]">Machete</div>
+                        </div>
+                    </div>
+
+                    <div class="p-2 rounded-xl bg-slate-900/80 border border-slate-800 flex items-center gap-2">
+                        <i class="fa-solid fa-bomb text-red-400 text-sm"></i>
+                        <div>
+                            <div class="text-[9px] text-slate-400">Arma Pesada</div>
+                            <div id="survivor-heavy-val" class="font-bold text-slate-200 text-[11px]">Granadas (2)</div>
+                        </div>
+                    </div>
+
+                    <div class="col-span-2 p-2 rounded-xl bg-slate-900/80 border border-slate-800 flex items-center gap-2">
+                        <i class="fa-solid fa-box text-orange-400 text-sm"></i>
+                        <div>
+                            <div class="text-[9px] text-slate-400">Caja Cuidada en Espalda</div>
+                            <div id="survivor-crate-val" class="font-bold text-amber-300 text-[11px]">Ninguna (Manos Libres)</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Kills & Experience -->
+            <div class="border-t border-slate-800 pt-2.5">
+                <div class="flex items-center justify-between text-xs">
+                    <span class="text-slate-400 font-bold"><i class="fa-solid fa-skull-crossbones text-rose-500 mr-1"></i> Bajas Zombies:</span>
+                    <span id="survivor-kills-val" class="font-black text-rose-400 text-sm">0</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Toast Notification Box -->
+        <div id="toast-message" class="mt-2 p-2.5 rounded-xl bg-red-500/20 border border-red-500/40 text-red-200 text-xs hidden flex items-center gap-2 shadow-lg">
+            <i class="fa-solid fa-circle-info text-red-400"></i>
+            <span id="toast-text">Evento registrado</span>
+        </div>
+    </aside>
+
+    <script>
+        // ==========================================================
+        // GLOBAL GAME CONFIGURATION & STATE
+        // ==========================================================
+        let gameSpeed = 1; // 0=Pausa, 1=1x, 2=2x, 5=5x
+        let cameraMode = 'orbit'; // 'orbit', 'base', 'follow'
+        let currentWave = 1;
+        let isWaveActive = false;
+        let waveTimer = 180; // 3 minutos de preparación
+        let waveTimerInterval = null;
+        let zombiesToSpawn = 0;
+        let zombiesAliveCount = 0;
+        let frameDelta = 0.016; // delta del último frame, usado para suavizar giros/animaciones
+        let camShelterCycleIndex = 0; // para ciclar cámara entre refugios activos
+
+        // Three.js Core Variables
+        let scene, camera, renderer, controls;
+        let ambientLight, sunLight;
+        let clock = new THREE.Clock();
+
+        // ==========================================================
+        // CITY MAP ZONES / REFUGIOS (soporta múltiples refugios activos)
+        // ==========================================================
+        const ZONES = {
+            MALL: { key: 'MALL', name: 'Centro Comercial', pos: new THREE.Vector3(0, 0, 0), radius: 22, intact: true, isActiveShelter: false, health: 100, turret: null, turretMesh: null },
+            HOUSES: { key: 'HOUSES', name: 'Casas Residenciales', pos: new THREE.Vector3(0, 0, -65), radius: 20, intact: true, isActiveShelter: false, health: 100, turret: null, turretMesh: null },
+            PARK: { key: 'PARK', name: 'Parque Central', pos: new THREE.Vector3(-60, 0, 0), radius: 20, intact: true, isActiveShelter: false, health: 100, turret: null, turretMesh: null },
+            PARKING: { key: 'PARKING', name: 'Estacionamiento Amplio', pos: new THREE.Vector3(60, 0, 0), radius: 22, intact: true, isActiveShelter: false, health: 100, turret: null, turretMesh: null }
+        };
+
+        // Refugios actualmente ocupados/defendidos por los supervivientes (puede ser >1 a la vez)
+        let activeShelterKeys = ['MALL'];
+
+        // Stockpile compartido de recursos entre todos los refugios
+        const baseResources = {
+            ammo: 2,
+            meds: 2,
+            food: 2,
+            heavy: 2
+        };
+
+        // ==========================================================
+        // ZOMBIE TYPES: básico, mediano y grande
+        // ==========================================================
+        const ZOMBIE_TYPES = {
+            BASIC:  { key: 'BASIC',  label: 'Rastrero',   scale: 1.0,  healthMult: 1.0, speedMult: 1.2,  damageMult: 1.0, bodyColor: 0x166534, headColor: 0x3f6212, eyeColor: 0xef4444, xp: 1 },
+            MEDIUM: { key: 'MEDIUM', label: 'Corpulento',  scale: 1.45, healthMult: 2.8, speedMult: 0.82, damageMult: 1.9, bodyColor: 0x374151, headColor: 0x1f2937, eyeColor: 0xf97316, xp: 3 },
+            LARGE:  { key: 'LARGE',  label: 'Titán',       scale: 2.1,  healthMult: 6.5, speedMult: 0.55, damageMult: 3.4, bodyColor: 0x450a0a, headColor: 0x1c0a0d, eyeColor: 0xfacc15, xp: 8 }
+        };
+
+        // Game Entities Collections
+        const survivors = [];
+        const zombies = [];
+        const dyingZombies = [];
+        const crates = [];
+        const barricades = [];
+        const projectiles = [];
+        const particleEffects = [];
+
+        let selectedSurvivorIndex = 0;
+
+        // Audio Synthesizer Engine
+        let synthGun, synthExplosion, synthPickup, synthZombie, synthTurret;
+
+        function initAudioEngine() {
+            if (window.Tone && !synthGun) {
+                try {
+                    Tone.start();
+                    synthGun = new Tone.PolySynth(Tone.Synth, {
+                        oscillator: { type: 'triangle' },
+                        envelope: { attack: 0.005, decay: 0.05, sustain: 0, release: 0.05 }
+                    }).toDestination();
+                    synthGun.volume.value = -12;
+
+                    synthExplosion = new Tone.NoiseSynth({
+                        noise: { type: 'brown' },
+                        envelope: { attack: 0.01, decay: 0.4, sustain: 0 }
+                    }).toDestination();
+                    synthExplosion.volume.value = -6;
+
+                    synthPickup = new Tone.Synth({
+                        oscillator: { type: 'sine' },
+                        envelope: { attack: 0.01, decay: 0.1, sustain: 0.1, release: 0.2 }
+                    }).toDestination();
+                    synthPickup.volume.value = -10;
+
+                    synthZombie = new Tone.Synth({
+                        oscillator: { type: 'sawtooth' },
+                        envelope: { attack: 0.1, decay: 0.3, sustain: 0.2, release: 0.3 }
+                    }).toDestination();
+                    synthZombie.volume.value = -18;
+
+                    synthTurret = new Tone.Synth({
+                        oscillator: { type: 'square' },
+                        envelope: { attack: 0.002, decay: 0.04, sustain: 0, release: 0.03 }
+                    }).toDestination();
+                    synthTurret.volume.value = -16;
+                } catch(e) {}
+            }
+        }
+
+        function playSound(type, pitch = 'C3') {
+            if (!window.Tone) return;
+            try {
+                if (!synthGun) initAudioEngine();
+                if (type === 'gun') synthGun.triggerAttackRelease(pitch, '16n');
+                else if (type === 'turret') synthTurret.triggerAttackRelease(pitch, '32n');
+                else if (type === 'explosion') synthExplosion.triggerAttackRelease('8n');
+                else if (type === 'pickup') synthPickup.triggerAttackRelease('E5', '8n');
+                else if (type === 'zombie') synthZombie.triggerAttackRelease('G2', '4n');
+            } catch(e) {}
+        }
+
+        function init3DWorld() {
+            const container = document.getElementById('canvas-container');
+
+            // Scene Setup
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x0a0e1a);
+            scene.fog = new THREE.FogExp2(0x0a0e1a, 0.006);
+
+            // Camera Setup
+            camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(0, 55, 80);
+
+            // WebGL Renderer Setup
+            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+            renderer.toneMapping = THREE.ACESFilmicToneMapping;
+            renderer.toneMappingExposure = 0.9;
+            container.appendChild(renderer.domElement);
+
+            // Orbit Controls
+            controls = new THREE.OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.05;
+            controls.maxPolarAngle = Math.PI / 2 - 0.02;
+            controls.minDistance = 8;
+            controls.maxDistance = 180;
+            controls.target.set(0, 2, 0);
+
+            // Lighting Setup
+            ambientLight = new THREE.AmbientLight(0x384152, 0.8);
+            scene.add(ambientLight);
+
+            sunLight = new THREE.DirectionalLight(0xffecd1, 1.1);
+            sunLight.position.set(40, 80, 50);
+            sunLight.castShadow = true;
+            sunLight.shadow.mapSize.width = 2048;
+            sunLight.shadow.mapSize.height = 2048;
+            sunLight.shadow.camera.near = 0.5;
+            sunLight.shadow.camera.far = 300;
+            const d = 90;
+            sunLight.shadow.camera.left = -d;
+            sunLight.shadow.camera.right = d;
+            sunLight.shadow.camera.top = d;
+            sunLight.shadow.camera.bottom = -d;
+            scene.add(sunLight);
+
+            const emergencyLight = new THREE.PointLight(0xef4444, 0.5, 120);
+            emergencyLight.position.set(0, 25, 0);
+            scene.add(emergencyLight);
+
+            // Build Map Environment
+            buildCityMap();
+            scatterCityRuins();
+            spawnInitialCrates();
+            initSurvivors();
+            activateShelter('MALL', true); // Refugio inicial gratuito
+
+            // Resize listener
+            window.addEventListener('resize', onWindowResize);
+
+            // Start wave prep timer loop
+            startWaveTimer();
+            renderSheltersPanel();
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        // ==========================================================
+        // CITY MAP CONSTRUCTION
+        // ==========================================================
+        function buildCityMap() {
+            const terrainGeo = new THREE.PlaneGeometry(220, 220);
+            const terrainMat = new THREE.MeshStandardMaterial({ color: 0x111827, roughness: 0.95 });
+            const terrain = new THREE.Mesh(terrainGeo, terrainMat);
+            terrain.rotation.x = -Math.PI / 2;
+            terrain.receiveShadow = true;
+            scene.add(terrain);
+
+            const roadMat = new THREE.MeshStandardMaterial({ color: 0x1f2937, roughness: 0.8 });
+
+            const roadH = new THREE.Mesh(new THREE.PlaneGeometry(220, 14), roadMat);
+            roadH.rotation.x = -Math.PI / 2;
+            roadH.position.set(0, 0.02, 0);
+            roadH.receiveShadow = true;
+            scene.add(roadH);
+
+            const roadV = new THREE.Mesh(new THREE.PlaneGeometry(14, 220), roadMat);
+            roadV.rotation.x = -Math.PI / 2;
+            roadV.position.set(0, 0.02, 0);
+            roadV.receiveShadow = true;
+            scene.add(roadV);
+
+            // ==========================================
+            // 1. SHOPPING MALL (CENTRO COMERCIAL) - CENTER
+            // ==========================================
+            const mallGroup = new THREE.Group();
+            mallGroup.position.set(0, 0, 0);
+
+            const mallFloor = new THREE.Mesh(new THREE.BoxGeometry(32, 0.15, 28), new THREE.MeshStandardMaterial({ color: 0x374151 }));
+            mallFloor.position.y = 0.08;
+            mallFloor.receiveShadow = true;
+            mallGroup.add(mallFloor);
+
+            const wallMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.4, metalness: 0.5 });
+
+            [[-15, -13], [15, -13], [-15, 13], [15, 13]].forEach(pos => {
+                const pillar = new THREE.Mesh(new THREE.BoxGeometry(1.5, 6, 1.5), wallMat);
+                pillar.position.set(pos[0], 3, pos[1]);
+                pillar.castShadow = true;
+                mallGroup.add(pillar);
+            });
+
+            const roof = new THREE.Mesh(new THREE.BoxGeometry(33, 0.4, 29), wallMat);
+            roof.position.y = 6.2;
+            roof.castShadow = true;
+            mallGroup.add(roof);
+
+            const signBg = new THREE.Mesh(new THREE.BoxGeometry(16, 2, 0.4), new THREE.MeshStandardMaterial({ color: 0xd97706 }));
+            signBg.position.set(0, 7.2, 14.2);
+            mallGroup.add(signBg);
+
+            // Escombros de fachada caída junto a la entrada
+            const mallRubble = createRubblePile(1.8, 0x334155);
+            mallRubble.position.set(-14, 0, 15);
+            mallGroup.add(mallRubble);
+            scene.add(mallGroup);
+
+            // ==========================================
+            // 2. PARKING LOT (ESTACIONAMIENTO) - EAST
+            // ==========================================
+            const parkingGroup = new THREE.Group();
+            parkingGroup.position.set(60, 0, 0);
+
+            const parkingLot = new THREE.Mesh(new THREE.PlaneGeometry(40, 40), new THREE.MeshStandardMaterial({ color: 0x111827, roughness: 0.9 }));
+            parkingLot.rotation.x = -Math.PI / 2;
+            parkingLot.position.y = 0.03;
+            parkingLot.receiveShadow = true;
+            parkingGroup.add(parkingLot);
+
+            const carColors = [0xef4444, 0x3b82f6, 0x64748b, 0x10b981, 0x7c2d12, 0x475569];
+            [[-10, -10], [8, -12], [-8, 10], [10, 8], [-15, 2], [15, -2]].forEach((pos, idx) => {
+                const car = createCarModel(carColors[idx % carColors.length], idx % 3 === 0);
+                car.position.set(pos[0], 0, pos[1]);
+                car.rotation.y = (idx * 1.2);
+                parkingGroup.add(car);
+            });
+
+            scene.add(parkingGroup);
+
+            // ==========================================
+            // 3. CITY PARK (PARQUE) - WEST
+            // ==========================================
+            const parkGroup = new THREE.Group();
+            parkGroup.position.set(-60, 0, 0);
+
+            const parkGrass = new THREE.Mesh(new THREE.PlaneGeometry(38, 38), new THREE.MeshStandardMaterial({ color: 0x064e3b, roughness: 0.8 }));
+            parkGrass.rotation.x = -Math.PI / 2;
+            parkGrass.position.y = 0.03;
+            parkGrass.receiveShadow = true;
+            parkGroup.add(parkGrass);
+
+            const fountainBase = new THREE.Mesh(new THREE.CylinderGeometry(4, 4, 0.8, 16), new THREE.MeshStandardMaterial({ color: 0x475569 }));
+            fountainBase.position.y = 0.4;
+            fountainBase.castShadow = true;
+            parkGroup.add(fountainBase);
+
+            [[-12, -12], [14, -10], [-10, 12], [12, 14], [0, -14]].forEach(pos => {
+                const tree = createTreeModel();
+                tree.position.set(pos[0], 0, pos[1]);
+                parkGroup.add(tree);
+            });
+
+            scene.add(parkGroup);
+
+            // ==========================================
+            // 4. SUBURBAN HOUSES (CASAS) - NORTH
+            // ==========================================
+            const housesGroup = new THREE.Group();
+            housesGroup.position.set(0, 0, -65);
+
+            [-25, 0, 25].forEach((xOffset, idx) => {
+                const house = createHouseModel(idx === 1); // casa central más dañada
+                house.position.set(xOffset, 0, 0);
+                housesGroup.add(house);
+            });
+
+            scene.add(housesGroup);
+        }
+
+        // Dispersa escombros, autos quemados, muros caídos y ruinas menores
+        // por toda la ciudad para transmitir una sensación de caos y abandono.
+        function scatterCityRuins() {
+            const exclusionZones = Object.values(ZONES).map(z => ({ pos: z.pos, radius: z.radius + 6 }));
+            const roadExclusion = (x, z) => (Math.abs(x) < 8 || Math.abs(z) < 8);
+
+            function isFree(x, z) {
+                if (roadExclusion(x, z)) return false;
+                for (const ex of exclusionZones) {
+                    if (Math.hypot(x - ex.pos.x, z - ex.pos.z) < ex.radius) return false;
+                }
+                return true;
+            }
+
+            // Generador pseudo-aleatorio determinista para posiciones consistentes
+            let seed = 1337;
+            function rnd() {
+                seed = (seed * 9301 + 49297) % 233280;
+                return seed / 233280;
+            }
+
+            let placed = 0;
+            let attempts = 0;
+            while (placed < 34 && attempts < 400) {
+                attempts++;
+                const x = (rnd() - 0.5) * 200;
+                const z = (rnd() - 0.5) * 200;
+                if (!isFree(x, z)) continue;
+
+                const roll = rnd();
+                let obj;
+                if (roll < 0.28) obj = createRubblePile(1.2 + rnd() * 1.6, 0x334155);
+                else if (roll < 0.5) obj = createBrokenWallSegment();
+                else if (roll < 0.66) obj = createBurntCarWreck();
+                else if (roll < 0.8) obj = createStreetDebris();
+                else if (roll < 0.9) obj = createDumpster();
+                else obj = createRuinedKiosk();
+
+                obj.position.set(x, 0, z);
+                obj.rotation.y = rnd() * Math.PI * 2;
+                scene.add(obj);
+                placed++;
+            }
+
+            // Postes de luz caídos / medio derribados a lo largo de las avenidas
+            [[-40, 5], [40, -5], [5, -40], [-5, 40], [5, 40], [-5, -40], [-100, 5], [100, -5]].forEach(([x, z]) => {
+                if (!isFree(x, z) && Math.abs(x) > 8 === false && Math.abs(z) > 8 === false) return;
+                const lamp = createBrokenLamppost();
+                lamp.position.set(x, 0, z);
+                scene.add(lamp);
+            });
+        }
+
+        // ==========================================================
+        // HELPER 3D MODELS - ENTORNO
+        // ==========================================================
+        function createCarModel(colorHex, burnt = false) {
+            const group = new THREE.Group();
+            const bodyColor = burnt ? 0x1c1917 : colorHex;
+            const body = new THREE.Mesh(new THREE.BoxGeometry(2.4, 1.1, 4.5), new THREE.MeshStandardMaterial({ color: bodyColor, metalness: burnt ? 0.1 : 0.6, roughness: burnt ? 0.95 : 0.3 }));
+            body.position.y = 0.7;
+            body.castShadow = true;
+            if (burnt) body.rotation.z = 0.12;
+            group.add(body);
+
+            const cabin = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.8, 2.4), new THREE.MeshStandardMaterial({ color: burnt ? 0x0c0a09 : 0x0f172a }));
+            cabin.position.set(0, 1.5, -0.2);
+            cabin.castShadow = true;
+            if (burnt) cabin.rotation.z = 0.12;
+            group.add(cabin);
+
+            return group;
+        }
+
+        function createTreeModel() {
+            const group = new THREE.Group();
+            const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.4, 3), new THREE.MeshStandardMaterial({ color: 0x78350f }));
+            trunk.position.y = 1.5;
+            trunk.castShadow = true;
+            group.add(trunk);
+
+            const foliage = new THREE.Mesh(new THREE.DodecahedronGeometry(2.2), new THREE.MeshStandardMaterial({ color: 0x047857, roughness: 0.8 }));
+            foliage.position.y = 3.8;
+            foliage.castShadow = true;
+            group.add(foliage);
+
+            return group;
+        }
+
+        function createHouseModel(damaged = false) {
+            const group = new THREE.Group();
+            const body = new THREE.Mesh(new THREE.BoxGeometry(14, 4.5, 12), new THREE.MeshStandardMaterial({ color: damaged ? 0x9ca3af : 0xe2e8f0, roughness: 0.7 }));
+            body.position.y = 2.25;
+            body.castShadow = true;
+            body.receiveShadow = true;
+            if (damaged) body.rotation.z = 0.03;
+            group.add(body);
+
+            const roof = new THREE.Mesh(new THREE.ConeGeometry(10, 3, 4), new THREE.MeshStandardMaterial({ color: 0x991b1b }));
+            roof.position.y = damaged ? 5.6 : 6;
+            roof.rotation.y = Math.PI / 4;
+            roof.rotation.z = damaged ? 0.18 : 0;
+            roof.castShadow = true;
+            group.add(roof);
+
+            const door = new THREE.Mesh(new THREE.BoxGeometry(2, 3, 0.2), new THREE.MeshStandardMaterial({ color: 0x78350f }));
+            door.position.set(0, 1.5, 6.05);
+            group.add(door);
+
+            if (damaged) {
+                // Boquete en la pared - bloque de escombros al pie de la casa
+                const rubble = createRubblePile(2.2, 0xcbd5e1);
+                rubble.position.set(3, 0, 6);
+                group.add(rubble);
+            }
+
+            return group;
+        }
+
+        function createRubblePile(size = 1.5, color = 0x334155) {
+            const group = new THREE.Group();
+            const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.95 });
+            const chunks = 4 + Math.floor(Math.random() * 3);
+            for (let i = 0; i < chunks; i++) {
+                const s = size * (0.4 + Math.random() * 0.6);
+                const chunk = new THREE.Mesh(new THREE.BoxGeometry(s, s * 0.7, s), mat);
+                chunk.position.set((Math.random() - 0.5) * size * 1.6, s * 0.3, (Math.random() - 0.5) * size * 1.6);
+                chunk.rotation.set(Math.random() * 0.6, Math.random() * Math.PI, Math.random() * 0.6);
+                chunk.castShadow = true;
+                chunk.receiveShadow = true;
+                group.add(chunk);
+            }
+            return group;
+        }
+
+        function createBrokenWallSegment() {
+            const group = new THREE.Group();
+            const mat = new THREE.MeshStandardMaterial({ color: 0x57534e, roughness: 0.9 });
+            const wall = new THREE.Mesh(new THREE.BoxGeometry(6, 3, 0.6), mat);
+            wall.position.y = 1.2;
+            wall.rotation.z = (Math.random() - 0.5) * 0.5;
+            wall.rotation.y = (Math.random() - 0.5) * 0.3;
+            wall.castShadow = true;
+            group.add(wall);
+
+            const rebar = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 2), new THREE.MeshStandardMaterial({ color: 0x78716c, metalness: 0.6 }));
+            rebar.position.set(2, 2, 0);
+            rebar.rotation.z = 0.4;
+            group.add(rebar);
+
+            const baseRubble = createRubblePile(1.6, 0x44403c);
+            baseRubble.position.set(-1.5, 0, 0.4);
+            group.add(baseRubble);
+
+            return group;
+        }
+
+        function createBurntCarWreck() {
+            return createCarModel(0x1c1917, true);
+        }
+
+        function createStreetDebris() {
+            const group = new THREE.Group();
+            const matMetal = new THREE.MeshStandardMaterial({ color: 0x475569, metalness: 0.5, roughness: 0.6 });
+
+            const sign = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.15, 2.2), new THREE.MeshStandardMaterial({ color: 0x71717a }));
+            sign.position.set(0, 0.15, 0);
+            sign.rotation.y = Math.random() * Math.PI;
+            group.add(sign);
+
+            const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.4, 1.1, 10), new THREE.MeshStandardMaterial({ color: 0xb45309, metalness: 0.4, roughness: 0.6 }));
+            barrel.position.set(1.2, 0.55, 0.6);
+            barrel.rotation.z = Math.random() > 0.5 ? 1.4 : 0;
+            barrel.position.y = barrel.rotation.z !== 0 ? 0.4 : 0.55;
+            barrel.castShadow = true;
+            group.add(barrel);
+
+            const plank = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.1, 0.4), new THREE.MeshStandardMaterial({ color: 0x57493a }));
+            plank.position.set(-1.2, 0.1, -0.6);
+            plank.rotation.y = Math.random() * Math.PI;
+            group.add(plank);
+
+            return group;
+        }
+
+        function createDumpster() {
+            const group = new THREE.Group();
+            const body = new THREE.Mesh(new THREE.BoxGeometry(2.2, 1.3, 1.4), new THREE.MeshStandardMaterial({ color: 0x14532d, metalness: 0.4, roughness: 0.7 }));
+            body.position.y = 0.65;
+            body.castShadow = true;
+            group.add(body);
+            const lid = new THREE.Mesh(new THREE.BoxGeometry(2.3, 0.15, 1.5), new THREE.MeshStandardMaterial({ color: 0x0f2e18 }));
+            lid.position.set(0.3, 1.35, 0);
+            lid.rotation.z = 0.5;
+            group.add(lid);
+            return group;
+        }
+
+        function createRuinedKiosk() {
+            const group = new THREE.Group();
+            const base = new THREE.Mesh(new THREE.CylinderGeometry(1.6, 1.6, 2.4, 8), new THREE.MeshStandardMaterial({ color: 0x78716c, roughness: 0.85 }));
+            base.position.y = 1.2;
+            base.castShadow = true;
+            base.receiveShadow = true;
+            group.add(base);
+
+            const roof = new THREE.Mesh(new THREE.ConeGeometry(2.1, 1.1, 8), new THREE.MeshStandardMaterial({ color: 0x991b1b }));
+            roof.position.y = 2.9;
+            roof.rotation.z = 0.25;
+            group.add(roof);
+
+            const rubble = createRubblePile(1.4, 0x57534e);
+            rubble.position.set(1.4, 0, 1.2);
+            group.add(rubble);
+
+            return group;
+        }
+
+        function createBrokenLamppost() {
+            const group = new THREE.Group();
+            const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.1, 4.5, 8), new THREE.MeshStandardMaterial({ color: 0x334155, metalness: 0.6 }));
+            pole.position.y = 2.25;
+            pole.rotation.z = 0.35 + Math.random() * 0.3;
+            pole.position.x = Math.sin(pole.rotation.z) * 2.2;
+            pole.position.y = Math.cos(pole.rotation.z) * 2.2;
+            pole.castShadow = true;
+            group.add(pole);
+            return group;
+        }
+
+        // ==========================================================
+        // TORRETAS DE DEFENSA
+        // ==========================================================
+        function createTurretModel(improvised) {
+            const group = new THREE.Group();
+            const baseMat = new THREE.MeshStandardMaterial({ color: improvised ? 0x57534e : 0x1e293b, metalness: 0.6, roughness: 0.4 });
+            const base = new THREE.Mesh(new THREE.CylinderGeometry(0.7, 0.9, 0.6, 10), baseMat);
+            base.position.y = 0.3;
+            base.castShadow = true;
+            group.add(base);
+
+            const turretHead = new THREE.Group();
+            turretHead.position.y = 0.75;
+            const headBox = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.5, 0.7), new THREE.MeshStandardMaterial({ color: improvised ? 0x78350f : 0xef4444, metalness: 0.5, roughness: 0.4 }));
+            turretHead.add(headBox);
+
+            const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.09, 1.4, 8), new THREE.MeshStandardMaterial({ color: 0x0f172a, metalness: 0.7 }));
+            barrel.rotation.x = Math.PI / 2;
+            barrel.position.z = 0.9;
+            turretHead.add(barrel);
+
+            group.add(turretHead);
+
+            return { mesh: group, headGroup: turretHead };
+        }
+
+        function activateShelter(zoneKey, free = false) {
+            const zone = ZONES[zoneKey];
+            if (!zone || zone.isActiveShelter) return;
+            zone.isActiveShelter = true;
+            zone.intact = true;
+            zone.health = Math.max(zone.health, 70);
+            if (!activeShelterKeys.includes(zoneKey)) activeShelterKeys.push(zoneKey);
+            buildTurretAt(zoneKey, free);
+        }
+
+        function buildTurretAt(zoneKey, free = false) {
+            const zone = ZONES[zoneKey];
+            if (zone.turretMesh) return; // ya tiene torreta
+
+            let improvised = true;
+            if (free || baseResources.heavy >= 1) {
+                if (!free) baseResources.heavy -= 1;
+                improvised = false;
+            }
+
+            const turretObj = createTurretModel(improvised);
+            turretObj.mesh.position.copy(zone.pos).add(new THREE.Vector3(0, 0, -zone.radius * 0.45));
+            scene.add(turretObj.mesh);
+
+            zone.turretMesh = turretObj.mesh;
+            zone.turret = {
+                headGroup: turretObj.headGroup,
+                damage: improvised ? 16 : 42,
+                range: improvised ? 17 : 24,
+                fireRate: improvised ? 1.1 : 0.55,
+                cooldown: 0,
+                improvised: improvised
+            };
+        }
+
+        function destroyTurretAt(zoneKey) {
+            const zone = ZONES[zoneKey];
+            if (zone.turretMesh) {
+                scene.remove(zone.turretMesh);
+                zone.turretMesh = null;
+                zone.turret = null;
+            }
+        }
+
+        // ==========================================================
+        // CAJAS DE SUMINISTROS
+        // ==========================================================
+        const CRATE_TYPES = {
+            WEAPON: { name: 'Caja de Armas de Fuego', color: 0xf59e0b, icon: 'fa-gun', type: 'weapon' },
+            MELEE: { name: 'Caja Armas Melee', color: 0xd97706, icon: 'fa-shield-cat', type: 'melee' },
+            HEAVY: { name: 'Caja Armas Pesadas', color: 0xef4444, icon: 'fa-bomb', type: 'heavy' },
+            MED: { name: 'Caja de Curaciones', color: 0x10b981, icon: 'fa-kit-medical', type: 'med' },
+            FOOD: { name: 'Caja de Comida', color: 0x3b82f6, icon: 'fa-utensils', type: 'food' }
+        };
+
+        function spawnCrate(typeKey, x, z) {
+            const config = CRATE_TYPES[typeKey];
+            const group = new THREE.Group();
+            group.position.set(x, 0, z);
+
+            const boxGeo = new THREE.BoxGeometry(1.2, 1.2, 1.2);
+            const boxMat = new THREE.MeshStandardMaterial({ color: config.color, roughness: 0.4, metalness: 0.2 });
+            const box = new THREE.Mesh(boxGeo, boxMat);
+            box.position.y = 0.6;
+            box.castShadow = true;
+            group.add(box);
+
+            const ringGeo = new THREE.RingGeometry(0.8, 1.2, 16);
+            const ringMat = new THREE.MeshBasicMaterial({ color: config.color, side: THREE.DoubleSide, transparent: true, opacity: 0.6 });
+            const ring = new THREE.Mesh(ringGeo, ringMat);
+            ring.rotation.x = -Math.PI / 2;
+            ring.position.y = 0.04;
+            group.add(ring);
+
+            scene.add(group);
+
+            const crateData = {
+                mesh: group,
+                typeKey: typeKey,
+                config: config,
+                position: new THREE.Vector3(x, 0, z),
+                isPickedUp: false
+            };
+
+            crates.push(crateData);
+            return crateData;
+        }
+
+        function spawnInitialCrates() {
+            crates.forEach(c => scene.remove(c.mesh));
+            crates.length = 0;
+
+            const locations = [
+                { type: 'WEAPON', x: -8, z: -5 },
+                { type: 'MED', x: 8, z: 5 },
+                { type: 'MELEE', x: -5, z: 8 },
+                { type: 'FOOD', x: 6, z: -8 },
+                { type: 'HEAVY', x: 0, z: -10 },
+
+                { type: 'WEAPON', x: 55, z: -10 },
+                { type: 'FOOD', x: 65, z: 12 },
+                { type: 'MED', x: 50, z: 15 },
+                { type: 'HEAVY', x: 62, z: -18 },
+
+                { type: 'HEAVY', x: -55, z: -8 },
+                { type: 'MELEE', x: -65, z: 10 },
+                { type: 'MED', x: -50, z: 14 },
+
+                { type: 'WEAPON', x: -22, z: -60 },
+                { type: 'HEAVY', x: 22, z: -60 },
+                { type: 'FOOD', x: 0, z: -58 }
+            ];
+
+            locations.forEach(loc => spawnCrate(loc.type, loc.x, loc.z));
+            addLogEvent("Se han desplegado nuevas cajas de suministros en la ciudad.");
+        }
+
+        // ==========================================================
+        // SUPERVIVIENTES
+        // ==========================================================
+        function initSurvivors() {
+            const survivorConfigs = [
+                { name: 'Alex', role: 'Líder', color: 0xef4444, weapon: 'Rifle de Asalto', melee: 'Machete Tactico', heavy: 'Granadas (3)' },
+                { name: 'Elena', role: 'Médico', color: 0x10b981, weapon: 'Escopeta Calibre 12', melee: 'Cuchillo Caza', heavy: 'Ninguna' },
+                { name: 'Marcus', role: 'Pesado', color: 0xf59e0b, weapon: 'Ametralladora', melee: 'Hacha de Mano', heavy: 'Bazuka RP3' },
+                { name: 'Sarah', role: 'Tiradora', color: 0x3b82f6, weapon: 'Rifle Precisión', melee: 'Machete', heavy: 'Granadas (2)' },
+                { name: 'Carlos', role: 'Ingeniero', color: 0x8b5cf6, weapon: 'Pistola 9mm', melee: 'Bate Reforzado', heavy: 'Lanza Granadas' }
+            ];
+
+            survivors.length = 0;
+            const activeZone = ZONES['MALL'];
+
+            survivorConfigs.forEach((cfg, idx) => {
+                const built = createHumanoidModel(cfg.color, 0xfde047, 1.0);
+                const group = built.group;
+                const spawnX = activeZone.pos.x + (idx * 2 - 4);
+                const spawnZ = activeZone.pos.z + (idx % 2 * 2 - 2);
+                group.position.set(spawnX, 0, spawnZ);
+                scene.add(group);
+
+                const survivorData = {
+                    id: idx,
+                    name: cfg.name,
+                    role: cfg.role,
+                    colorHex: cfg.color,
+                    mesh: group,
+                    limbs: built.limbs,
+                    animPhase: Math.random() * 10,
+                    isMoving: false,
+                    position: group.position,
+                    targetPos: new THREE.Vector3(spawnX, 0, spawnZ),
+                    health: 100,
+                    maxHealth: 100,
+                    stamina: 100,
+                    ammo: 120,
+                    weapon: cfg.weapon,
+                    melee: cfg.melee,
+                    heavy: cfg.heavy,
+                    carriedCrate: null,
+                    kills: 0,
+                    homeZoneKey: 'MALL',
+                    aiState: 'SCAVENGE', // 'SCAVENGE', 'DEFEND_BASE', 'FLEE'
+                    fleeTarget: null,
+                    fleeZoneKey: null,
+                    targetCrate: null,
+                    thoughtText: 'Explorando zona...',
+                    shootCooldown: 0,
+                    collapsed: false,
+                    collapseTimer: 0
+                };
+
+                survivors.push(survivorData);
+            });
+
+            renderSurvivorTabs();
+            inspectSurvivor(0);
+        }
+
+        // Crea un modelo humanoide (usado por supervivientes y zombies) con
+        // extremidades articuladas para permitir animación de caminata fluida.
+        function createHumanoidModel(bodyColor, headColor, scale = 1.0, eyeColor = null) {
+            const group = new THREE.Group();
+            group.scale.setScalar(scale);
+
+            const bodyMat = new THREE.MeshStandardMaterial({ color: bodyColor, roughness: 0.6 });
+
+            const torso = new THREE.Mesh(new THREE.CylinderGeometry(0.36, 0.32, 0.9, 8), bodyMat);
+            torso.position.y = 1.15;
+            torso.castShadow = true;
+            group.add(torso);
+
+            const headGeo = new THREE.SphereGeometry(0.32, 10, 10);
+            const headMat = new THREE.MeshStandardMaterial({ color: headColor });
+            const head = new THREE.Mesh(headGeo, headMat);
+            head.position.y = 1.78;
+            head.castShadow = true;
+            group.add(head);
+
+            if (eyeColor) {
+                const eyeGeo = new THREE.SphereGeometry(0.07, 8, 8);
+                const eyeMat = new THREE.MeshBasicMaterial({ color: eyeColor });
+                const eyeL = new THREE.Mesh(eyeGeo, eyeMat);
+                eyeL.position.set(-0.12, 1.8, 0.26);
+                const eyeR = new THREE.Mesh(eyeGeo, eyeMat);
+                eyeR.position.set(0.12, 1.8, 0.26);
+                group.add(eyeL);
+                group.add(eyeR);
+            }
+
+            // Piernas: pivote en la cadera para poder rotarlas al caminar
+            function makeLimb(isLeg, xOffset) {
+                const pivot = new THREE.Group();
+                pivot.position.set(xOffset, isLeg ? 0.75 : 1.5, 0);
+                const len = isLeg ? 0.75 : 0.65;
+                const limbMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.1, len, 6), bodyMat);
+                limbMesh.position.y = -len / 2;
+                limbMesh.castShadow = true;
+                pivot.add(limbMesh);
+                return pivot;
+            }
+
+            const legL = makeLimb(true, -0.18);
+            const legR = makeLimb(true, 0.18);
+            const armL = makeLimb(false, -0.42);
+            const armR = makeLimb(false, 0.42);
+            group.add(legL, legR, armL, armR);
+
+            // Arma visible en el brazo derecho (para supervivientes)
+            const gun = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.15, 0.6), new THREE.MeshStandardMaterial({ color: 0x1e293b }));
+            gun.position.set(0.22, 1.1, 0.35);
+            group.add(gun);
+
+            return { group, limbs: { legL, legR, armL, armR }, head, torso };
+        }
+
+        // ==========================================================
+        // ZOMBIES
+        // ==========================================================
+        function getWaveZombieCount(wave) {
+            // Escalado infinito: crece con cada oleada sin límite superior
+            return Math.round(45 + wave * 13 + Math.pow(wave, 1.32) * 3);
+        }
+
+        function getWaveTypeMix(wave) {
+            const total = getWaveZombieCount(wave);
+            let mediumRatio = Math.min(0.5, 0.04 + wave * 0.035);
+            let largeRatio = Math.min(0.3, Math.max(0, (wave - 1) * 0.028));
+            let basicRatio = Math.max(0.12, 1 - mediumRatio - largeRatio);
+            const sum = basicRatio + mediumRatio + largeRatio;
+            basicRatio /= sum; mediumRatio /= sum; largeRatio /= sum;
+
+            const large = Math.round(total * largeRatio);
+            const medium = Math.round(total * mediumRatio);
+            const basic = Math.max(1, total - large - medium);
+            return { BASIC: basic, MEDIUM: medium, LARGE: large, total: basic + medium + large };
+        }
+
+        function spawnZombieHorde(wave) {
+            const mix = getWaveTypeMix(wave);
+            zombiesToSpawn = mix.total;
+            zombiesAliveCount = mix.total;
+            updateUI();
+
+            addLogEvent(`¡ALERTA! Horda Zombie Oleada ${wave}: ${mix.BASIC} rastreros, ${mix.MEDIUM} corpulentos, ${mix.LARGE} titanes.`);
+            playSound('zombie');
+
+            // Centro de gravedad de todos los refugios activos, para rodear el área defendida
+            const centroid = new THREE.Vector3();
+            activeShelterKeys.forEach(k => centroid.add(ZONES[k].pos));
+            centroid.divideScalar(Math.max(1, activeShelterKeys.length));
+
+            const spawnList = [];
+            Object.keys(mix).forEach(typeKey => {
+                if (typeKey === 'total') return;
+                for (let i = 0; i < mix[typeKey]; i++) spawnList.push(typeKey);
+            });
+            // Barajar para que los tipos no salgan en bloques
+            for (let i = spawnList.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [spawnList[i], spawnList[j]] = [spawnList[j], spawnList[i]];
+            }
+
+            spawnList.forEach((typeKey, i) => {
+                const angle = Math.random() * Math.PI * 2;
+                const dist = 95 + Math.random() * 25;
+                const x = centroid.x + Math.cos(angle) * dist;
+                const z = centroid.z + Math.sin(angle) * dist;
+
+                setTimeout(() => {
+                    createZombieEntity(x, z, typeKey);
+                }, (i * 90) / gameSpeed);
+            });
+        }
+
+        function createZombieEntity(x, z, typeKey) {
+            const type = ZOMBIE_TYPES[typeKey] || ZOMBIE_TYPES.BASIC;
+            const built = createHumanoidModel(type.bodyColor, type.headColor, type.scale, type.eyeColor);
+            built.group.position.set(x, 0, z);
+            scene.add(built.group);
+
+            const baseHealth = 40 + (currentWave * 6);
+            const zombieData = {
+                mesh: built.group,
+                limbs: built.limbs,
+                animPhase: Math.random() * 10,
+                isMoving: false,
+                position: built.group.position,
+                typeKey: typeKey,
+                typeLabel: type.label,
+                health: baseHealth * type.healthMult,
+                maxHealth: baseHealth * type.healthMult,
+                speed: (0.085 + Math.random() * 0.035) * type.speedMult,
+                damage: (5 + currentWave * 0.7) * type.damageMult,
+                attackCooldown: 0,
+                dying: false,
+                deathTimer: 0
+            };
+
+            zombies.push(zombieData);
+        }
+
+        // ==========================================================
+        // IA DE SUPERVIVIENTES
+        // ==========================================================
+        function countNearbyZombies(pos, range) {
+            let n = 0;
+            zombies.forEach(z => { if (z.health > 0 && !z.dying && pos.distanceTo(z.position) < range) n++; });
+            return n;
+        }
+
+        function countAliveGarrison(zoneKey) {
+            return survivors.filter(s => s.homeZoneKey === zoneKey && s.health > 0).length;
+        }
+
+        function pickFleeDestination(currentKey) {
+            let bestKey = null;
+            let bestScore = -Infinity;
+            activeShelterKeys.forEach(k => {
+                if (k === currentKey) return;
+                const z = ZONES[k];
+                if (!z.intact) return;
+                const score = z.health - countNearbyZombies(z.pos, z.radius + 10) * 5;
+                if (score > bestScore) { bestScore = score; bestKey = k; }
+            });
+            if (bestKey) return { pos: ZONES[bestKey].pos.clone(), zoneKey: bestKey };
+
+            // No hay otro refugio disponible: huir a campo abierto, lejos de la horda
+            const homePos = ZONES[currentKey] ? ZONES[currentKey].pos : new THREE.Vector3();
+            let avg = new THREE.Vector3();
+            let cnt = 0;
+            zombies.forEach(z => {
+                if (z.health > 0 && !z.dying && homePos.distanceTo(z.position) < 45) { avg.add(z.position); cnt++; }
+            });
+            let awayDir = new THREE.Vector3(1, 0, 0.3);
+            if (cnt > 0) {
+                avg.divideScalar(cnt);
+                awayDir.subVectors(homePos, avg);
+                if (awayDir.lengthSq() < 0.01) awayDir.set(1, 0, 0);
+                awayDir.normalize();
+            }
+            const fleePos = homePos.clone().addScaledVector(awayDir, 32);
+            return { pos: fleePos, zoneKey: null };
+        }
+
+        function updateSurvivorAI(delta) {
+            survivors.forEach(s => {
+                if (s.health <= 0) { updateFallenSurvivor(s, delta); return; }
+
+                s.shootCooldown = Math.max(0, s.shootCooldown - delta);
+
+                let nearestZombie = null;
+                let minDist = 999;
+
+                zombies.forEach(z => {
+                    if (z.health > 0 && !z.dying) {
+                        const dist = s.position.distanceTo(z.position);
+                        if (dist < minDist) { minDist = dist; nearestZombie = z; }
+                    }
+                });
+
+                if (nearestZombie && minDist < 30 && s.aiState !== 'FLEE') {
+                    aimTowards(s, nearestZombie.position);
+                    if (s.shootCooldown <= 0 && s.ammo > 0) {
+                        fireSurvivorWeapon(s, nearestZombie);
+                    }
+                }
+
+                if (isWaveActive) {
+                    const homeZone = ZONES[s.homeZoneKey] && ZONES[s.homeZoneKey].intact ? ZONES[s.homeZoneKey] : ZONES[activeShelterKeys[0] || 'MALL'];
+                    const nearbyZ = countNearbyZombies(homeZone.pos, homeZone.radius + 14);
+                    const garrisonAlive = Math.max(1, countAliveGarrison(s.homeZoneKey));
+
+                    // Decisión de huida: si la horda supera ampliamente a la guarnición local
+                    if (s.aiState !== 'FLEE' && nearbyZ >= 5 && nearbyZ > garrisonAlive * 2.6) {
+                        s.aiState = 'FLEE';
+                        const dest = pickFleeDestination(s.homeZoneKey);
+                        s.fleeTarget = dest.pos;
+                        s.fleeZoneKey = dest.zoneKey;
+                        addLogEvent(`${s.name} se repliega: superado en número en ${homeZone.name}.`);
+                    }
+
+                    if (s.aiState === 'FLEE') {
+                        s.thoughtText = '¡Replegándonos, nos superan en número!';
+                        moveTowards(s, s.fleeTarget, 0.155);
+                        const arrived = s.position.distanceTo(s.fleeTarget) < 3;
+                        const stillNearbyThreat = countNearbyZombies(s.position, 14) >= 4;
+
+                        if (arrived) {
+                            if (s.fleeZoneKey) {
+                                s.homeZoneKey = s.fleeZoneKey;
+                                s.aiState = 'DEFEND_BASE';
+                            } else if (!stillNearbyThreat) {
+                                s.aiState = 'DEFEND_BASE';
+                            } else {
+                                // Sigue amenazado en campo abierto: re-evaluar destino
+                                const dest = pickFleeDestination(s.homeZoneKey);
+                                s.fleeTarget = dest.pos;
+                                s.fleeZoneKey = dest.zoneKey;
+                            }
+                        }
+                    } else {
+                        s.aiState = 'DEFEND_BASE';
+                        s.thoughtText = `Defendiendo ${homeZone.name}`;
+                        const defPos = homeZone.pos.clone().add(new THREE.Vector3(Math.cos(s.id * 1.7) * homeZone.radius * 0.4, 0, Math.sin(s.id * 1.7) * homeZone.radius * 0.4));
+                        if (s.position.distanceTo(defPos) > 2) {
+                            moveTowards(s, defPos, 0.12);
+                        } else {
+                            s.isMoving = false;
+                        }
+                    }
+                } else {
+                    s.aiState = 'SCAVENGE';
+                    const homeZone = ZONES[s.homeZoneKey] || ZONES['MALL'];
+
+                    if (s.carriedCrate) {
+                        s.thoughtText = `Transportando ${s.carriedCrate.config.name} a Base`;
+                        const distToBase = s.position.distanceTo(homeZone.pos);
+
+                        if (distToBase < 4) {
+                            depositCrateAtBase(s);
+                        } else {
+                            moveTowards(s, homeZone.pos, 0.1);
+                        }
+                    } else {
+                        if (!s.targetCrate || s.targetCrate.isPickedUp) {
+                            s.targetCrate = findClosestAvailableCrate(s.position);
+                        }
+
+                        if (s.targetCrate) {
+                            s.thoughtText = `Recolectando ${s.targetCrate.config.name}`;
+                            const distToCrate = s.position.distanceTo(s.targetCrate.position);
+
+                            if (distToCrate < 1.5) {
+                                pickupCrate(s, s.targetCrate);
+                            } else {
+                                moveTowards(s, s.targetCrate.position, 0.11);
+                            }
+                        } else {
+                            s.thoughtText = "Patrullando perímetro...";
+                            const patrolPos = homeZone.pos.clone().add(new THREE.Vector3(Math.cos(s.id + clock.getElapsedTime() * 0.5) * 10, 0, Math.sin(s.id + clock.getElapsedTime() * 0.5) * 10));
+                            moveTowards(s, patrolPos, 0.08);
+                        }
+                    }
+                }
+
+                animateEntityLimbs(s, delta);
+            });
+
+            maybeExpandShelters();
+        }
+
+        // Intenta abrir un nuevo refugio simultáneo cuando hay recursos y
+        // supervivientes suficientes para cubrir más terreno de la ciudad.
+        function maybeExpandShelters() {
+            if (isWaveActive) return;
+            if (activeShelterKeys.length >= Math.min(4, Object.keys(ZONES).length)) return;
+            const aliveCount = survivors.filter(s => s.health > 0).length;
+            if (aliveCount < 3) return;
+
+            const chance = 0.0009 * gameSpeed * Math.min(3, currentWave); // acumulativo por frame
+            if (Math.random() > chance) return;
+
+            const candidateKey = Object.keys(ZONES).find(k => !ZONES[k].isActiveShelter && ZONES[k].intact);
+            if (!candidateKey) return;
+
+            activateShelter(candidateKey, false);
+
+            // Redistribuir aproximadamente un tercio de la guarnición más numerosa hacia el nuevo refugio
+            const homeCounts = {};
+            survivors.forEach(s => { if (s.health > 0) homeCounts[s.homeZoneKey] = (homeCounts[s.homeZoneKey] || 0) + 1; });
+            const donorKey = Object.keys(homeCounts).sort((a, b) => homeCounts[b] - homeCounts[a])[0];
+            const donors = survivors.filter(s => s.homeZoneKey === donorKey && s.health > 0);
+            const moveCount = Math.max(1, Math.floor(donors.length / 3));
+            for (let i = 0; i < moveCount; i++) {
+                donors[i].homeZoneKey = candidateKey;
+            }
+
+            addLogEvent(`¡Nuevo refugio establecido en ${ZONES[candidateKey].name}! El grupo se expande para cubrir más terreno.`);
+            showToast(`Refugio adicional fundado: ${ZONES[candidateKey].name}`);
+            renderSheltersPanel();
+        }
+
+        function updateFallenSurvivor(s, delta) {
+            if (!s.collapsed) {
+                s.collapseTimer += delta * gameSpeed;
+                const t = Math.min(1, s.collapseTimer / 0.5);
+                s.mesh.rotation.x = t * (Math.PI / 2.1);
+                s.mesh.position.y = 0;
+                if (t >= 1) s.collapsed = true;
+            }
+        }
+
+        function moveTowards(entity, targetPos, speed) {
+            const dir = new THREE.Vector3().subVectors(targetPos, entity.position);
+            dir.y = 0;
+            if (dir.length() > 0.15) {
+                dir.normalize();
+                entity.position.addScaledVector(dir, speed * gameSpeed);
+                aimTowards(entity, targetPos);
+                entity.isMoving = true;
+            } else {
+                entity.isMoving = false;
+            }
+        }
+
+        function aimTowards(entity, targetPos) {
+            const dx = targetPos.x - entity.position.x;
+            const dz = targetPos.z - entity.position.z;
+            if (Math.abs(dx) < 0.001 && Math.abs(dz) < 0.001) return;
+            const desiredYaw = Math.atan2(dx, dz);
+            const targetQuat = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), desiredYaw);
+            const smoothing = Math.min(1, frameDelta * 9 * Math.max(1, gameSpeed));
+            entity.mesh.quaternion.slerp(targetQuat, smoothing);
+        }
+
+        // Anima el balanceo de piernas/brazos para una caminata fluida
+        function animateEntityLimbs(entity, delta) {
+            if (!entity.limbs) return;
+            const l = entity.limbs;
+            if (entity.isMoving) {
+                entity.animPhase += delta * 9 * Math.max(0.4, gameSpeed);
+                const swing = Math.sin(entity.animPhase) * 0.55;
+                l.legL.rotation.x = swing;
+                l.legR.rotation.x = -swing;
+                l.armL.rotation.x = -swing * 0.75;
+                l.armR.rotation.x = swing * 0.75;
+            } else {
+                l.legL.rotation.x *= 0.8;
+                l.legR.rotation.x *= 0.8;
+                l.armL.rotation.x *= 0.8;
+                l.armR.rotation.x *= 0.8;
+            }
+        }
+
+        function findClosestAvailableCrate(pos) {
+            let closest = null;
+            let minDist = 999;
+            crates.forEach(c => {
+                if (!c.isPickedUp) {
+                    const d = pos.distanceTo(c.position);
+                    if (d < minDist) { minDist = d; closest = c; }
+                }
+            });
+            return closest;
+        }
+
+        function pickupCrate(survivor, crate) {
+            crate.isPickedUp = true;
+            scene.remove(crate.mesh);
+            survivor.carriedCrate = crate;
+            playSound('pickup');
+            addLogEvent(`${survivor.name} recogió ${crate.config.name}.`);
+            updateUI();
+        }
+
+        function depositCrateAtBase(survivor) {
+            if (!survivor.carriedCrate) return;
+            const crateType = survivor.carriedCrate.typeKey;
+
+            if (crateType === 'WEAPON') baseResources.ammo += 2;
+            else if (crateType === 'MED') baseResources.meds += 2;
+            else if (crateType === 'FOOD') baseResources.food += 2;
+            else if (crateType === 'HEAVY') baseResources.heavy += 1;
+
+            addLogEvent(`${survivor.name} entregó ${survivor.carriedCrate.config.name} al Refugio.`);
+            survivor.carriedCrate = null;
+            survivor.targetCrate = null;
+
+            survivor.health = Math.min(survivor.maxHealth, survivor.health + 20);
+            survivor.ammo = Math.min(200, survivor.ammo + 50);
+
+            playSound('pickup');
+            updateUI();
+        }
+
+        // ==========================================================
+        // IA DE ZOMBIES
+        // ==========================================================
+        function getNearestActiveShelterKey(pos) {
+            let bestKey = null;
+            let bestDist = Infinity;
+            activeShelterKeys.forEach(k => {
+                const z = ZONES[k];
+                if (!z.intact) return;
+                const d = pos.distanceTo(z.pos);
+                if (d < bestDist) { bestDist = d; bestKey = k; }
+            });
+            return bestKey;
+        }
+
+        function updateZombieAI(delta) {
+            for (let i = zombies.length - 1; i >= 0; i--) {
+                const z = zombies[i];
+                if (z.dying) { updateDyingZombie(z, delta); continue; }
+                if (z.health <= 0) continue;
+
+                z.attackCooldown = Math.max(0, z.attackCooldown - delta);
+
+                let targetSurvivor = null;
+                let minDist = 999;
+
+                survivors.forEach(s => {
+                    if (s.health > 0) {
+                        const d = z.position.distanceTo(s.position);
+                        if (d < minDist) { minDist = d; targetSurvivor = s; }
+                    }
+                });
+
+                if (targetSurvivor && minDist < 15) {
+                    moveTowards(z, targetSurvivor.position, z.speed);
+
+                    if (minDist < 1.5 && z.attackCooldown <= 0) {
+                        targetSurvivor.health -= z.damage;
+                        z.attackCooldown = 1.2;
+                        createBloodParticle(targetSurvivor.position);
+
+                        if (targetSurvivor.health <= 0) {
+                            targetSurvivor.health = 0;
+                            addLogEvent(`¡${targetSurvivor.name} ha caído en combate!`);
+                        }
+                        updateUI();
+                    }
+                } else {
+                    const nearestShelterKey = getNearestActiveShelterKey(z.position);
+                    if (!nearestShelterKey) { animateEntityLimbs(z, delta); continue; }
+                    const targetZone = ZONES[nearestShelterKey];
+
+                    moveTowards(z, targetZone.pos, z.speed);
+                    const distToBase = z.position.distanceTo(targetZone.pos);
+
+                    if (distToBase < targetZone.radius && z.attackCooldown <= 0) {
+                        targetZone.health = Math.max(0, targetZone.health - 1.5);
+                        z.attackCooldown = 1.5;
+
+                        if (targetZone.health <= 0) {
+                            overrunShelter(nearestShelterKey);
+                        }
+                        updateUI();
+                    }
+                }
+
+                animateEntityLimbs(z, delta);
+            }
+
+            updateTurrets(delta);
+        }
+
+        function updateDyingZombie(z, delta) {
+            z.deathTimer += delta * gameSpeed;
+            const t = Math.min(1, z.deathTimer / 0.45);
+            z.mesh.rotation.x = t * (Math.PI / 2);
+            z.mesh.position.y = -t * 0.15;
+            if (t >= 1) {
+                scene.remove(z.mesh);
+                const idx = zombies.indexOf(z);
+                if (idx > -1) zombies.splice(idx, 1);
+                const dIdx = dyingZombies.indexOf(z);
+                if (dIdx > -1) dyingZombies.splice(dIdx, 1);
+            }
+        }
+
+        function overrunShelter(zoneKey) {
+            const zone = ZONES[zoneKey];
+            zone.intact = false;
+            zone.isActiveShelter = false;
+            destroyTurretAt(zoneKey);
+            activeShelterKeys = activeShelterKeys.filter(k => k !== zoneKey);
+
+            addLogEvent(`¡EL REFUGIO EN ${zone.name.toUpperCase()} HA SIDO DESTRUIDO!`);
+
+            if (activeShelterKeys.length === 0) {
+                // Todos los refugios cayeron: reconstrucción de emergencia en el Mall
+                const fallback = ZONES['MALL'];
+                fallback.intact = true;
+                fallback.isActiveShelter = true;
+                fallback.health = 50;
+                activeShelterKeys = ['MALL'];
+                buildTurretAt('MALL', true);
+                survivors.forEach(s => { if (s.health > 0) { s.homeZoneKey = 'MALL'; s.aiState = 'FLEE'; s.fleeTarget = fallback.pos.clone(); s.fleeZoneKey = 'MALL'; } });
+                addLogEvent(`¡Sin refugios en pie! Reconstrucción de emergencia en ${fallback.name}.`);
+                createDebrisBarricades(fallback.pos);
+            } else {
+                // Reasignar la guarnición del refugio caído al más cercano que siga activo
+                const survivorsHere = survivors.filter(s => s.homeZoneKey === zoneKey && s.health > 0);
+                survivorsHere.forEach(s => {
+                    const dest = pickFleeDestination(zoneKey);
+                    s.aiState = 'FLEE';
+                    s.fleeTarget = dest.pos;
+                    s.fleeZoneKey = dest.zoneKey || activeShelterKeys[0];
+                });
+                addLogEvent(`Los supervivientes de ${zone.name} se repliegan a un refugio aliado.`);
+            }
+
+            createDebrisBarricades(zone.pos);
+            renderSheltersPanel();
+            updateUI();
+        }
+
+        function updateTurrets(delta) {
+            activeShelterKeys.forEach(key => {
+                const zone = ZONES[key];
+                if (!zone.turret) return;
+                const t = zone.turret;
+                t.cooldown = Math.max(0, t.cooldown - delta);
+
+                let nearest = null, minDist = t.range;
+                zombies.forEach(z => {
+                    if (z.health > 0 && !z.dying) {
+                        const d = zone.pos.distanceTo(z.position);
+                        if (d < minDist) { minDist = d; nearest = z; }
+                    }
+                });
+
+                if (nearest) {
+                    const dx = nearest.position.x - zone.pos.x;
+                    const dz = nearest.position.z - zone.pos.z;
+                    const yaw = Math.atan2(dx, dz);
+                    t.headGroup.rotation.y += (yaw - t.headGroup.rotation.y) * Math.min(1, frameDelta * 6);
+
+                    if (t.cooldown <= 0 && isWaveActive) {
+                        t.cooldown = t.fireRate;
+                        const turretWorldPos = zone.turretMesh.position.clone().add(new THREE.Vector3(0, 0.75, 0));
+                        spawnProjectile(turretWorldPos, nearest, t.damage, 75, 0x38bdf8);
+                        playSound('turret', t.improvised ? 'A2' : 'D2');
+                    }
+                }
+            });
+        }
+
+        // ==========================================================
+        // COMBATE: PROYECTILES CON TRAYECTORIA FLUIDA
+        // ==========================================================
+        function fireSurvivorWeapon(survivor, targetZombie) {
+            survivor.ammo--;
+            survivor.shootCooldown = 0.22;
+
+            const dmg = 25 + Math.floor(Math.random() * 15);
+
+            playSound('gun');
+            createMuzzleFlash(survivor.position);
+            spawnProjectile(survivor.position.clone().add(new THREE.Vector3(0, 1.1, 0)), targetZombie, dmg, 62, 0xfde68a);
+        }
+
+        function spawnProjectile(originPos, targetEntity, damage, speed, color) {
+            const geo = new THREE.SphereGeometry(0.09, 6, 6);
+            const mat = new THREE.MeshBasicMaterial({ color: color });
+            const mesh = new THREE.Mesh(geo, mat);
+            mesh.position.copy(originPos);
+            scene.add(mesh);
+
+            projectiles.push({ mesh, targetEntity, damage, speed, color });
+        }
+
+        function updateProjectiles(delta) {
+            for (let i = projectiles.length - 1; i >= 0; i--) {
+                const p = projectiles[i];
+                if (!p.targetEntity || p.targetEntity.health <= 0 || p.targetEntity.dying) {
+                    scene.remove(p.mesh);
+                    projectiles.splice(i, 1);
+                    continue;
+                }
+
+                const targetPos = p.targetEntity.position.clone().add(new THREE.Vector3(0, 1, 0));
+                const toTarget = new THREE.Vector3().subVectors(targetPos, p.mesh.position);
+                const dist = toTarget.length();
+                const step = p.speed * delta * Math.max(0.001, gameSpeed);
+
+                if (dist <= step) {
+                    applyProjectileImpact(p);
+                    scene.remove(p.mesh);
+                    projectiles.splice(i, 1);
+                } else {
+                    toTarget.normalize();
+                    p.mesh.position.addScaledVector(toTarget, step);
+                }
+            }
+        }
+
+        function applyProjectileImpact(p) {
+            const targetZombie = p.targetEntity;
+            targetZombie.health -= p.damage;
+            createMuzzleFlash(targetZombie.position, 0xffffff, 0.15);
+
+            if (targetZombie.health <= 0 && !targetZombie.dying) {
+                targetZombie.health = 0;
+                targetZombie.dying = true;
+                targetZombie.deathTimer = 0;
+                dyingZombies.push(targetZombie);
+
+                zombiesAliveCount = Math.max(0, zombiesAliveCount - 1);
+
+                // Otorgar la baja al superviviente más cercano vivo (aprox. quien disparó)
+                let closestSurvivor = null, minD = 6;
+                survivors.forEach(s => {
+                    if (s.health > 0) {
+                        const d = s.position.distanceTo(targetZombie.position);
+                        if (d < minD) { minD = d; closestSurvivor = s; }
+                    }
+                });
+                if (closestSurvivor) closestSurvivor.kills++;
+
+                if (zombiesAliveCount === 0 && isWaveActive) {
+                    endWaveSuccess();
+                }
+            }
+
+            updateUI();
+        }
+
+        // ==========================================================
+        // INTERVENCIONES DEL ESPECTADOR
+        // ==========================================================
+        function createDebrisBarricades(centerPos) {
+            for (let i = 0; i < 6; i++) {
+                const angle = (i / 6) * Math.PI * 2;
+                const bx = centerPos.x + Math.cos(angle) * 8;
+                const bz = centerPos.z + Math.sin(angle) * 8;
+
+                const barGeo = new THREE.BoxGeometry(3, 1.2, 0.8);
+                const barMat = new THREE.MeshStandardMaterial({ color: 0x78350f, roughness: 0.9 });
+                const bar = new THREE.Mesh(barGeo, barMat);
+                bar.position.set(bx, 0.6, bz);
+                bar.rotation.y = angle;
+                bar.castShadow = true;
+                scene.add(bar);
+                barricades.push(bar);
+            }
+        }
+
+        function startWaveTimer() {
+            if (waveTimerInterval) clearInterval(waveTimerInterval);
+            waveTimer = 180;
+
+            waveTimerInterval = setInterval(() => {
+                if (gameSpeed === 0) return;
+
+                if (!isWaveActive) {
+                    waveTimer -= gameSpeed;
+                    if (waveTimer <= 0) {
+                        triggerZombieWave();
+                    }
+                    updateUI();
+                }
+            }, 1000);
+        }
+
+        function forceStartWave() {
+            if (!isWaveActive) {
+                waveTimer = 0;
+                triggerZombieWave();
+            }
+        }
+
+        function triggerZombieWave() {
+            isWaveActive = true;
+            spawnZombieHorde(currentWave);
+
+            const badge = document.getElementById('phase-badge');
+            badge.className = 'flex items-center gap-1.5 font-bold px-3 py-1.5 rounded-xl border bg-rose-500/20 text-rose-300 border-rose-500/40 pulse-alert';
+            document.getElementById('phase-icon').className = 'fa-solid fa-biohazard text-rose-400';
+            document.getElementById('phase-text').innerText = `¡COMBATE OLEADA ${currentWave}!`;
+        }
+
+        function endWaveSuccess() {
+            isWaveActive = false;
+            addLogEvent(`¡OLEADA ${currentWave} SUPERADA! Reponiendo suministros...`);
+            currentWave++;
+            spawnInitialCrates();
+            waveTimer = 180;
+
+            // Reparación parcial de todos los refugios activos tras la oleada
+            activeShelterKeys.forEach(k => {
+                ZONES[k].health = Math.min(100, ZONES[k].health + 18);
+            });
+
+            // Reasignar a la defensa (por si quedaron en huida) a los supervivientes vivos
+            survivors.forEach(s => {
+                if (s.health > 0 && s.aiState === 'FLEE') {
+                    s.aiState = 'DEFEND_BASE';
+                }
+            });
+
+            const badge = document.getElementById('phase-badge');
+            badge.className = 'flex items-center gap-1.5 font-bold px-3 py-1.5 rounded-xl border bg-cyan-500/20 text-cyan-300 border-cyan-500/30';
+            document.getElementById('phase-icon').className = 'fa-solid fa-clock text-cyan-400';
+
+            renderSheltersPanel();
+            updateUI();
+        }
+
+        function triggerIntervention(type) {
+            initAudioEngine();
+
+            if (type === 'airdrop') {
+                // Cae un suministro en cada refugio activo (cubre todo el territorio ocupado)
+                activeShelterKeys.forEach(key => {
+                    const zone = ZONES[key];
+                    spawnCrate('HEAVY', zone.pos.x + (Math.random() * 6 - 3), zone.pos.z + (Math.random() * 6 - 3));
+                    spawnCrate('WEAPON', zone.pos.x + (Math.random() * 6 - 3), zone.pos.z + (Math.random() * 6 - 3));
+                });
+                addLogEvent("¡Suministros aéreos lanzados en todos los Refugios activos!");
+                showToast("Cajas de armas lanzadas desde el aire.");
+            } else if (type === 'artillery') {
+                let killed = 0;
+                zombies.forEach(z => {
+                    if (z.health > 0 && !z.dying) {
+                        z.health -= 120;
+                        if (z.health <= 0) {
+                            z.health = 0;
+                            z.dying = true;
+                            z.deathTimer = 0;
+                            dyingZombies.push(z);
+                            killed++;
+                        }
+                    }
+                });
+                zombiesAliveCount = Math.max(0, zombiesAliveCount - killed);
+                playSound('explosion');
+                addLogEvent(`¡Ataque de Artillería destruyó ${killed} zombies!`);
+                showToast(`Bombardeo orbital ejecutado: -${killed} zombies.`);
+                if (zombiesAliveCount === 0 && isWaveActive) endWaveSuccess();
+            } else if (type === 'adrenaline') {
+                survivors.forEach(s => {
+                    if (s.health > 0) {
+                        s.health = s.maxHealth;
+                        s.ammo += 60;
+                    }
+                });
+                addLogEvent("¡Chute de Adrenalina! Supervivientes curados al 100%.");
+                showToast("Adrenalina aplicada a todos los supervivientes.");
+            } else if (type === 'barricade') {
+                activeShelterKeys.forEach(key => {
+                    const zone = ZONES[key];
+                    zone.health = Math.min(100, zone.health + 30);
+                    createDebrisBarricades(zone.pos);
+                });
+                addLogEvent("Barricadas de contención reforzadas en todos los refugios.");
+                showToast("Estructuras de refugio reparadas +30%.");
+            }
+            updateUI();
+        }
+
+        function createMuzzleFlash(pos, color = 0xfef08a, life = 0.06) {
+            const p = new THREE.Mesh(new THREE.SphereGeometry(0.3, 8, 8), new THREE.MeshBasicMaterial({ color }));
+            p.position.copy(pos).add(new THREE.Vector3(0, 1.1, 0));
+            scene.add(p);
+            setTimeout(() => scene.remove(p), life * 1000);
+        }
+
+        function createBloodParticle(pos) {
+            const p = new THREE.Mesh(new THREE.SphereGeometry(0.25, 6, 6), new THREE.MeshBasicMaterial({ color: 0xdc2626 }));
+            p.position.copy(pos).add(new THREE.Vector3(0, 1.0, 0));
+            scene.add(p);
+            setTimeout(() => scene.remove(p), 120);
+        }
+
+        // ==========================================================
+        // UI / HUD
+        // ==========================================================
+        function renderSurvivorTabs() {
+            const container = document.getElementById('survivor-selector-list');
+            container.innerHTML = '';
+
+            survivors.forEach((s, idx) => {
+                const btn = document.createElement('button');
+                btn.onclick = () => inspectSurvivor(idx);
+                btn.className = `p-2 rounded-2xl flex flex-col items-center justify-center transition border ${selectedSurvivorIndex === idx ? 'bg-red-600/30 border-red-500 text-white' : 'bg-slate-900/80 border-slate-800 text-slate-400 hover:bg-slate-800'} ${s.health <= 0 ? 'opacity-40' : ''}`;
+                btn.innerHTML = `
+                    <div class="w-7 h-7 rounded-xl flex items-center justify-center font-extrabold text-xs text-slate-950 mb-1" style="background-color: #${s.colorHex.toString(16)}">
+                        ${s.name.charAt(0)}
+                    </div>
+                    <span class="text-[9px] font-bold truncate max-w-full">${s.name}</span>
+                `;
+                container.appendChild(btn);
+            });
+        }
+
+        function inspectSurvivor(index) {
+            selectedSurvivorIndex = index;
+            renderSurvivorTabs();
+            updateUI();
+
+            if (cameraMode === 'follow') {
+                const s = survivors[selectedSurvivorIndex];
+                if (s) controls.target.copy(s.position);
+            }
+        }
+
+        function renderSheltersPanel() {
+            const container = document.getElementById('shelters-panel-container');
+            if (!container) return;
+            container.innerHTML = '';
+
+            const badge = document.getElementById('shelters-count-badge');
+            if (badge) badge.innerText = activeShelterKeys.length;
+
+            activeShelterKeys.forEach(key => {
+                const zone = ZONES[key];
+                const garrison = countAliveGarrison(key);
+                const turretLabel = zone.turret ? (zone.turret.improvised ? 'Improvisada' : 'Pesada') : 'Sin torreta';
+                const healthColor = zone.health > 50 ? 'bg-emerald-500' : zone.health > 20 ? 'bg-amber-500' : 'bg-rose-600';
+
+                const card = document.createElement('div');
+                card.className = 'space-y-1 text-xs bg-slate-900/60 p-2.5 rounded-2xl border border-slate-800';
+                card.innerHTML = `
+                    <div class="flex justify-between items-center text-[10px]">
+                        <span class="text-cyan-300 font-bold truncate">${zone.name}</span>
+                        <span class="text-slate-400">${garrison} <i class="fa-solid fa-user-shield"></i></span>
+                    </div>
+                    <div class="w-full h-1.5 rounded-full bg-slate-800 overflow-hidden">
+                        <div class="h-full ${healthColor} transition-all duration-300" style="width: ${Math.max(0, zone.health)}%"></div>
+                    </div>
+                    <div class="flex justify-between text-[9px] text-slate-400">
+                        <span><i class="fa-solid fa-tower-observation mr-1"></i>${turretLabel}</span>
+                        <span>${Math.round(zone.health)}%</span>
+                    </div>
+                `;
+                container.appendChild(card);
+            });
+        }
+
+        function updateUI() {
+            document.getElementById('wave-number-display').innerText = currentWave;
+            document.getElementById('zombie-count-display').innerText = `${zombiesAliveCount} / ${zombiesToSpawn}`;
+
+            if (!isWaveActive) {
+                const mins = Math.floor(waveTimer / 60);
+                const secs = Math.floor(waveTimer % 60);
+                document.getElementById('phase-text').innerText = `Búsqueda (${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')})`;
+            }
+
+            // Recursos compartidos de la reserva
+            document.getElementById('res-ammo-val').innerText = baseResources.ammo;
+            document.getElementById('res-med-val').innerText = baseResources.meds;
+            document.getElementById('res-food-val').innerText = baseResources.food;
+            document.getElementById('res-heavy-val').innerText = baseResources.heavy;
+
+            renderSheltersPanel();
+
+            const s = survivors[selectedSurvivorIndex];
+            if (s) {
+                document.getElementById('survivor-name-display').innerText = s.name;
+                document.getElementById('survivor-role-badge').innerText = s.role;
+                document.getElementById('survivor-weapon-display').innerText = `Arma: ${s.weapon}`;
+                document.getElementById('survivor-state-display').innerText = s.health <= 0 ? 'Caído en combate' : s.thoughtText;
+
+                document.getElementById('val-health').innerText = `${Math.round(s.health)} / ${s.maxHealth}`;
+                document.getElementById('bar-health').style.width = `${Math.max(0, (s.health / s.maxHealth) * 100)}%`;
+
+                document.getElementById('val-stamina').innerText = `${Math.round(s.stamina)}%`;
+                document.getElementById('bar-stamina').style.width = `${s.stamina}%`;
+
+                document.getElementById('val-ammo').innerText = `${s.ammo} rds`;
+                document.getElementById('bar-ammo').style.width = `${Math.min(100, (s.ammo / 120) * 100)}%`;
+
+                document.getElementById('survivor-melee-val').innerText = s.melee;
+                document.getElementById('survivor-heavy-val').innerText = s.heavy;
+                document.getElementById('survivor-crate-val').innerText = s.carriedCrate ? s.carriedCrate.config.name : 'Ninguna (Manos Libres)';
+                document.getElementById('survivor-kills-val').innerText = s.kills;
+
+                document.getElementById('survivor-avatar-icon').style.backgroundColor = `#${s.colorHex.toString(16)}`;
+            }
+
+            updateFloatingThoughtBubbles();
+        }
+
+        function updateFloatingThoughtBubbles() {
+            const container = document.getElementById('thought-bubbles-container');
+            container.innerHTML = '';
+
+            survivors.forEach(s => {
+                if (s.health <= 0) return;
+
+                const tempV = s.position.clone().add(new THREE.Vector3(0, 2.5, 0));
+                tempV.project(camera);
+
+                const x = (tempV.x * .5 + .5) * window.innerWidth;
+                const y = (-(tempV.y * .5) + .5) * window.innerHeight;
+
+                if (tempV.z < 1) {
+                    const bubble = document.createElement('div');
+                    bubble.className = 'thought-bubble glass-panel px-2.5 py-1 rounded-xl text-[10px] font-bold text-slate-200 border border-slate-700 shadow-xl flex items-center gap-1.5';
+                    bubble.style.left = `${x}px`;
+                    bubble.style.top = `${y}px`;
+                    bubble.innerHTML = `
+                        <div class="w-2 h-2 rounded-full" style="background-color: #${s.colorHex.toString(16)}"></div>
+                        <span>${s.name}: ${s.thoughtText}</span>
+                    `;
+                    container.appendChild(bubble);
+                }
+            });
+        }
+
+        function setSpeed(speed) {
+            gameSpeed = speed;
+            [0, 1, 2, 5].forEach(sp => {
+                const btn = document.getElementById(`btn-speed-${sp}`);
+                if (btn) {
+                    if (sp === speed) btn.className = 'w-8 h-8 rounded-xl bg-red-600 text-white font-bold text-xs flex items-center justify-center';
+                    else btn.className = 'w-8 h-8 rounded-xl bg-slate-800 text-slate-300 hover:bg-slate-700 font-bold text-xs flex items-center justify-center';
+                }
+            });
+        }
+
+        function setCameraMode(mode) {
+            if (mode === 'base' && cameraMode === 'base') {
+                // Ciclar entre los refugios activos en clics sucesivos
+                camShelterCycleIndex = (camShelterCycleIndex + 1) % Math.max(1, activeShelterKeys.length);
+            } else {
+                camShelterCycleIndex = 0;
+            }
+            cameraMode = mode;
+
+            if (mode === 'base') {
+                const key = activeShelterKeys[camShelterCycleIndex] || 'MALL';
+                const zone = ZONES[key];
+                controls.target.copy(zone.pos);
+                camera.position.set(zone.pos.x, 35, zone.pos.z + 45);
+            } else if (mode === 'follow') {
+                const s = survivors[selectedSurvivorIndex];
+                if (s) controls.target.copy(s.position);
+            }
+        }
+
+        function addLogEvent(msg) {
+            const container = document.getElementById('sim-log-container');
+            const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+            const item = document.createElement('div');
+            item.innerHTML = `<span class="text-red-400 font-bold">[${timeStr}]</span> ${msg}`;
+            container.appendChild(item);
+            container.scrollTop = container.scrollHeight;
+        }
+
+        function showToast(text) {
+            const toast = document.getElementById('toast-message');
+            document.getElementById('toast-text').innerText = text;
+            toast.classList.remove('hidden');
+            setTimeout(() => toast.classList.add('hidden'), 3500);
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+
+            const delta = clock.getDelta();
+            frameDelta = Math.min(0.1, delta);
+
+            if (gameSpeed > 0) {
+                updateSurvivorAI(delta);
+                updateZombieAI(delta);
+                updateProjectiles(delta);
+            }
+
+            if (cameraMode === 'follow' && survivors[selectedSurvivorIndex]) {
+                const s = survivors[selectedSurvivorIndex];
+                controls.target.lerp(s.position, 0.05);
+            }
+
+            controls.update();
+            renderer.render(scene, camera);
+        }
+
+        // Start 3D World on window load
+        window.onload = function() {
+            init3DWorld();
+            animate();
+        };
+
+    </script>
+</body>
+</html>
