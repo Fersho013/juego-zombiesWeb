@@ -112,20 +112,37 @@
             scene.add(parkGroup);
 
             // ==========================================
-            // 4. SUBURBAN HOUSES (CASAS) - NORTH
+            // 4. SUBURBAN HOUSES (CASAS) - NORTH: TOTALMENTE DESTRUIDAS
+            // Solo escombros y losas vacias. Los supervivientes deben
+            // re-armarlas para fundar aqui su refugio custom.
             // ==========================================
             const housesGroup = new THREE.Group();
             housesGroup.position.set(0, 0, -65);
 
-            [-25, 0, 25].forEach((xOffset, idx) => {
-                const house = createHouseModel(idx === 1); // casa central más dañada
-                house.position.set(xOffset, 0, 0);
-                housesGroup.add(house);
+            [-25, 0, 25].forEach((xOffset) => {
+                // Losa vacia calcinada (marca del lote, no bloquea).
+                const slab = new THREE.Mesh(new THREE.BoxGeometry(15, 0.15, 13),
+                    new THREE.MeshStandardMaterial({ color: 0x1f2937, roughness: 0.95 }));
+                slab.position.set(xOffset, 0.07, 0);
+                slab.receiveShadow = true;
+                housesGroup.add(slab);
+                // 2-3 pilas de escombros por lote (con hitbox, se pueden despejar).
+                const rubbleA = createRubblePile(2.4, 0x44403c);
+                rubbleA.position.set(xOffset - 3.5, 0, 2.5);
+                housesGroup.add(rubbleA);
+                const rubbleB = createRubblePile(2.0, 0x57534e);
+                rubbleB.position.set(xOffset + 3.5, 0, -2.5);
+                housesGroup.add(rubbleB);
+                const broken = createBrokenWallSegment();
+                broken.position.set(xOffset, 0, 0);
+                broken.rotation.y = Math.random() * Math.PI;
+                housesGroup.add(broken);
             });
 
             scene.add(housesGroup);
 
-            // Colisiones del entorno: nadie atraviesa pilares, autos, arboles, fuente ni casas.
+            // Colisiones del entorno: nadie atraviesa pilares, autos, arboles, fuente.
+            // Las casas NO bloquean en bloque (estan vacias); solo sus escombros.
             if (typeof registerCollider === 'function') {
                 [[-15, -13], [15, -13], [-15, 13], [15, 13]].forEach(p => {
                     registerCollider(new THREE.Vector3(p[0], 0, p[1]), 1.2, { id: `mall-pillar-${p[0]}-${p[1]}` }, 'env', false);
@@ -137,8 +154,13 @@
                 [[-12, -12], [14, -10], [-10, 12], [12, 14], [0, -14]].forEach(p => {
                     registerCollider(new THREE.Vector3(-60 + p[0], 0, p[1]), 1.0, { id: `tree-${p[0]}-${p[1]}` }, 'env', false);
                 });
+                // Escombros residenciales: bloquean pero se pueden destruir/despejar.
                 [-25, 0, 25].forEach(x => {
-                    registerCollider(new THREE.Vector3(x, 0, -65), 7.5, { id: `house-${x}`, hp: 120 }, 'env', false);
+                    const r1 = { id: `house-rubble-a-${x}`, hp: 80, mesh: null, residential: true };
+                    const r2 = { id: `house-rubble-b-${x}`, hp: 80, mesh: null, residential: true };
+                    const c1 = registerCollider(new THREE.Vector3(x - 3.5, 0, -65 + 2.5), 2.0, r1, 'env', true);
+                    const c2 = registerCollider(new THREE.Vector3(x + 3.5, 0, -65 - 2.5), 1.8, r2, 'env', true);
+                    r1.collider = c1; r2.collider = c2;
                 });
             }
         }
