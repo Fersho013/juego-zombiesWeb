@@ -79,17 +79,37 @@ function init3DWorld() {
 
         // ==========================================================
 
+        // Bucle a 60 fps fijos: acumulador + pasos de 1/60 (independiente del monitor)
+        let lastFrameTime = performance.now();
+        let stepAccumulator = 0;
+
+        function stepGame(fixedDelta) {
+            frameDelta = Math.min(0.1, fixedDelta);
+            updateSurvivorAI(fixedDelta);
+            updateZombieAI(fixedDelta);
+            updateProjectiles(fixedDelta);
+            if (typeof updateAirSupport === 'function') updateAirSupport(fixedDelta);
+            if (typeof updateTowerBars === 'function') updateTowerBars();
+        }
+
 function animate() {
             requestAnimationFrame(animate);
 
-            const delta = clock.getDelta();
-            frameDelta = Math.min(0.1, delta);
+            const now = performance.now();
+            const frameTime = Math.min(0.25, (now - lastFrameTime) / 1000);
+            lastFrameTime = now;
 
             if (gameSpeed > 0) {
-                updateSurvivorAI(delta);
-                updateZombieAI(delta);
-                updateProjectiles(delta);
-                if (typeof updateAirSupport === 'function') updateAirSupport(delta);
+                stepAccumulator += frameTime;
+                let steps = 0;
+                while (stepAccumulator >= FIXED_STEP && steps < 4) {
+                    stepGame(FIXED_STEP);
+                    stepAccumulator -= FIXED_STEP;
+                    steps++;
+                }
+                if (steps === 4) stepAccumulator = 0; // anti-espiral si el tab se congela
+            } else {
+                stepAccumulator = 0;
             }
 
             if (cameraMode === 'follow' && survivors[selectedSurvivorIndex]) {
