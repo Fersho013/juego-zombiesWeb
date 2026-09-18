@@ -112,37 +112,12 @@
             scene.add(parkGroup);
 
             // ==========================================
-            // 4. SUBURBAN HOUSES (CASAS) - NORTH: TOTALMENTE DESTRUIDAS
-            // Solo escombros y losas vacias. Los supervivientes deben
-            // re-armarlas para fundar aqui su refugio custom.
+            // 4. GRAN CASA EN RUINAS - NORTH (doble de grande, una sola)
+            // En ruinas pero con puerta principal grande garantizada al sur,
+            // ventanas abiertas e interior amplio para torretas/suministros.
             // ==========================================
-            const housesGroup = new THREE.Group();
-            housesGroup.position.set(0, 0, -65);
-
-            [-25, 0, 25].forEach((xOffset) => {
-                // Losa vacia calcinada (marca del lote, no bloquea).
-                const slab = new THREE.Mesh(new THREE.BoxGeometry(15, 0.15, 13),
-                    new THREE.MeshStandardMaterial({ color: 0x1f2937, roughness: 0.95 }));
-                slab.position.set(xOffset, 0.07, 0);
-                slab.receiveShadow = true;
-                housesGroup.add(slab);
-                // 2-3 pilas de escombros por lote (con hitbox, se pueden despejar).
-                const rubbleA = createRubblePile(2.4, 0x44403c);
-                rubbleA.position.set(xOffset - 3.5, 0, 2.5);
-                housesGroup.add(rubbleA);
-                const rubbleB = createRubblePile(2.0, 0x57534e);
-                rubbleB.position.set(xOffset + 3.5, 0, -2.5);
-                housesGroup.add(rubbleB);
-                const broken = createBrokenWallSegment();
-                broken.position.set(xOffset, 0, 0);
-                broken.rotation.y = Math.random() * Math.PI;
-                housesGroup.add(broken);
-            });
-
-            scene.add(housesGroup);
-
+            buildGrandRuinHouse();
             // Colisiones del entorno: nadie atraviesa pilares, autos, arboles, fuente.
-            // Las casas NO bloquean en bloque (estan vacias); solo sus escombros.
             if (typeof registerCollider === 'function') {
                 [[-15, -13], [15, -13], [-15, 13], [15, 13]].forEach(p => {
                     registerCollider(new THREE.Vector3(p[0], 0, p[1]), 1.2, { id: `mall-pillar-${p[0]}-${p[1]}` }, 'env', false);
@@ -153,14 +128,6 @@
                 registerCollider(new THREE.Vector3(-60, 0, 0), 4.2, { id: 'fountain' }, 'env', false);
                 [[-12, -12], [14, -10], [-10, 12], [12, 14], [0, -14]].forEach(p => {
                     registerCollider(new THREE.Vector3(-60 + p[0], 0, p[1]), 1.0, { id: `tree-${p[0]}-${p[1]}` }, 'env', false);
-                });
-                // Escombros residenciales: bloquean pero se pueden destruir/despejar.
-                [-25, 0, 25].forEach(x => {
-                    const r1 = { id: `house-rubble-a-${x}`, hp: 80, mesh: null, residential: true };
-                    const r2 = { id: `house-rubble-b-${x}`, hp: 80, mesh: null, residential: true };
-                    const c1 = registerCollider(new THREE.Vector3(x - 3.5, 0, -65 + 2.5), 2.0, r1, 'env', true);
-                    const c2 = registerCollider(new THREE.Vector3(x + 3.5, 0, -65 - 2.5), 1.8, r2, 'env', true);
-                    r1.collider = c1; r2.collider = c2;
                 });
             }
         }
@@ -257,6 +224,76 @@
             group.add(foliage);
 
             return group;
+        }
+
+        // Gran Casa en ruinas: doble de grande, abierta y sin bucles de colision.
+        // Losa 30x26 en (0,-65). Muros arruinados bajos (visuales, sin collider)
+        // salvo 2 esquinas en pie. Puerta principal grande 6m al SUR garantizada,
+        // ventanas abiertas (huecos sin cristal) e interior vacio amplio.
+        function buildGrandRuinHouse() {
+            const cx = 0, cz = -65;
+            const g = new THREE.Group();
+            const slab = new THREE.Mesh(new THREE.BoxGeometry(30, 0.15, 26),
+                new THREE.MeshStandardMaterial({ color: 0x1f2937, roughness: 0.95 }));
+            slab.position.set(cx, 0.07, cz);
+            slab.receiveShadow = true;
+            g.add(slab);
+            const ruinMat = new THREE.MeshStandardMaterial({ color: 0x6b7280, roughness: 0.95 });
+            const frameMat = new THREE.MeshStandardMaterial({ color: 0x78350f, roughness: 0.9 });
+            // Muros bajos arruinados (h=1.1, visuales: se pueden pisar/rodear, NO bloquean).
+            // Norte (trasero): dos tramos con ventana central abierta de 4m.
+            [[-9.5, -13], [9.5, -13]].forEach(([ox, oz]) => {
+                const w = new THREE.Mesh(new THREE.BoxGeometry(9, 1.1, 0.6), ruinMat);
+                w.position.set(cx + ox, 0.55, cz + oz);
+                w.castShadow = true;
+                g.add(w);
+            });
+            // Este y Oeste: tramos bajos con huecos de ventana de 3m (sin collider).
+            [[15, -6.5, Math.PI / 2], [15, 6.5, Math.PI / 2], [-15, -6.5, Math.PI / 2], [-15, 6.5, Math.PI / 2]].forEach(([ox, oz, ry]) => {
+                const w = new THREE.Mesh(new THREE.BoxGeometry(8, 1.1, 0.6), ruinMat);
+                w.position.set(cx + ox, 0.55, cz + oz);
+                w.rotation.y = ry;
+                w.castShadow = true;
+                g.add(w);
+            });
+            // Sur (frontal): dos tramos dejando PUERTA PRINCIPAL de 6m al centro.
+            [[-10.5, 13], [10.5, 13]].forEach(([ox, oz]) => {
+                const w = new THREE.Mesh(new THREE.BoxGeometry(9, 1.3, 0.6), ruinMat);
+                w.position.set(cx + ox, 0.65, cz + oz);
+                w.castShadow = true;
+                g.add(w);
+            });
+            // Marco de puerta principal grande (6m, abierto, sin hoja).
+            const lintel = new THREE.Mesh(new THREE.BoxGeometry(7, 0.5, 0.8), frameMat);
+            lintel.position.set(cx, 3.0, cz + 13);
+            g.add(lintel);
+            [-3.2, 3.2].forEach(off => {
+                const post = new THREE.Mesh(new THREE.BoxGeometry(0.5, 3.2, 0.7), frameMat);
+                post.position.set(cx + off, 1.6, cz + 13);
+                post.castShadow = true;
+                g.add(post);
+            });
+            // Marcos de ventana rotos (decorativos, elevados, no bloquean paso).
+            [[-9.5, -13], [9.5, -13], [0, -13]].forEach(([ox, oz]) => {
+                const f = new THREE.Mesh(new THREE.BoxGeometry(3, 0.3, 0.7), frameMat);
+                f.position.set(cx + ox, 1.35, cz + oz);
+                f.rotation.z = 0.12;
+                g.add(f);
+            });
+            // Escombros pequeños en esquinas interiores (despejables, con collider).
+            const r1 = createRubblePile(1.6, 0x44403c);
+            r1.position.set(cx - 11, 0, cz - 9);
+            g.add(r1);
+            const r2 = createRubblePile(1.6, 0x57534e);
+            r2.position.set(cx + 11, 0, cz - 9);
+            g.add(r2);
+            scene.add(g);
+            if (typeof registerCollider === 'function') {
+                const ref1 = { id: 'grand-rubble-nw', hp: 60, mesh: r1, residential: true };
+                registerCollider(new THREE.Vector3(cx - 11, 0, cz - 9), 1.6, ref1, 'env', true);
+                const ref2 = { id: 'grand-rubble-ne', hp: 60, mesh: r2, residential: true };
+                registerCollider(new THREE.Vector3(cx + 11, 0, cz - 9), 1.6, ref2, 'env', true);
+            }
         }
 
         function createHouseModel(damaged = false) {
