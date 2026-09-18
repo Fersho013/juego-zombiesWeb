@@ -247,7 +247,13 @@
                 { name: 'Carlos', role: 'Ingeniero', color: 0x8b5cf6, weapon: 'Pistola 9mm', primary: 'PISTOL', melee: 'Bate Reforzado', heavy: 'Lanza Granadas', grenades: 2, medkits: 1 }
             ];
             const usedNames = new Set(survivors.map(o => o.name));
-            const cfg = templates.find(t => !usedNames.has(t.name)) || templates[survivors.length % templates.length];
+            let cfg = templates.find(t => !usedNames.has(t.name));
+            if (!cfg) {
+                // Más allá de 5: reclutas adicionales (hasta 50).
+                const n = survivors.length + 1;
+                const base = templates[(n - 1) % templates.length];
+                cfg = { ...base, name: `Recluta-${n}` };
+            }
             const built = createHumanoidModel(cfg.color, 0xfde047, 1.0);
             const group = built.group;
             group.position.set(x, y || 0, z);
@@ -386,46 +392,104 @@
             survivor.weaponMesh = w;
         }
 
-        // Casa-refugio de 4 muros (puertas + ventanas): cada muro es barricada con HP
-        function createShelterHouse(zoneKey) {
+        // Puerta de supervivientes: ellos pasan, los zombies no (la deben destruir).
+        function createSurvivorDoor(shelterKey, x, z, ry) {
+            const mesh = new THREE.Mesh(new THREE.BoxGeometry(2.0, 2.2, 0.3),
+                new THREE.MeshStandardMaterial({ color: 0x15803d, roughness: 0.7 }));
+            mesh.position.set(x, 1.1, z);
+            mesh.rotation.y = ry || 0;
+            mesh.castShadow = true;
+            scene.add(mesh);
+            const rec = { mesh: mesh, position: mesh.position, shelterKey: shelterKey, health: 150, maxHealth: 150 };
+            doors.push(rec);
+            if (typeof registerCollider === 'function') registerCollider(rec.position, 1.1, rec, 'door', false);
+            return rec;
+        }
+        function nearestDoor(pos, range) {
+            let best = null, bestD = range;
+            for (const d of doors) {
+                if (d.health <= 0) continue;
+                const dd = pos.distanceTo(d.position);
+                if (dd < bestD) { bestD = dd; best = d; }
+            }
+            return best;
+        }
+        function destroyDoor(d) {
+            scene.remove(d.mesh);
+            if (typeof unregisterColliderForRef === 'function') unregisterColliderForRef(d);
+            const i = doors.indexOf(d);
+            if (i > -1) doors.splice(i, 1);
+            addLogEvent('Una puerta de supervivientes fue destruida por la horda.');
+        }
+        // Casa-refugio con PUERTA ABIERTA por lado (hueco 2m) y ventanas destruidas
+        // (marcos rotos, sin cristal: acceso libre). Niveles: 1 mini / 2 casa / 3 fortaleza.
+        function createShelterHouse(zoneKey, level) {
             const zone = ZONES[zoneKey];
+            const lv = level || shelterLevels[zoneKey] || 2;
+            shelterLevels[zoneKey] = lv;
             const group = new THREE.Group();
             group.position.copy(zone.pos);
-            const wallMat = new THREE.MeshStandardMaterial({ color: 0xcbd5e1, roughness: 0.8 });
+            const wallMat = new THREE.MeshStandardMaterial({ color: lv >= 3 ? 0x64748b : 0xcbd5e1, roughness: 0.8 });
             const frameMat = new THREE.MeshStandardMaterial({ color: 0x78350f, roughness: 0.9 });
-            const glassMat = new THREE.MeshStandardMaterial({ color: 0x38bdf8, roughness: 0.2, metalness: 0.4 });
-            const H = 7; // medio lado de la casa
+            const H = lv === 1 ? 5 : 7; // mini-casa mas chica
+            const wallH = lv === 1 ? 1.6 : (lv >= 3 ? 3.2 : 2.6);
+            const wallLen = lv === 1 ? 8 : 12;
+            const segLen = (wallLen - 2) / 2; // hueco central 2m para puerta
             const sides = [
                 { x: 0, z: -H, ry: 0 }, { x: 0, z: H, ry: 0 },
                 { x: -H, z: 0, ry: Math.PI / 2 }, { x: H, z: 0, ry: Math.PI / 2 }
             ];
             sides.forEach(side => {
-                const wall = new THREE.Mesh(new THREE.BoxGeometry(12, 2.6, 0.5), wallMat);
-                wall.position.set(zone.pos.x + side.x, 1.3, zone.pos.z + side.z);
-                wall.rotation.y = side.ry;
-                wall.castShadow = true;
-                wall.receiveShadow = true;
-                scene.add(wall);
-                // Puerta (marco + hueco oscuro)
-                const door = new THREE.Mesh(new THREE.BoxGeometry(1.6, 2.0, 0.6), frameMat);
-                door.position.set(wall.position.x, 1.0, wall.position.z);
-                door.rotation.y = side.ry;
-                scene.add(door);
-                group.add(door);
-                // Ventanas (cristal a cada lado de la puerta)
+                // Dos segmentos por lado dejando puerta central libre.
+                [-1, 1].forEach(sgn => {
+                    const seg = new THREE.Mesh(new THREE.BoxGeometry(segLen, wallH, 0.5), wallMat);
+                    const offAlong = sgn * (1 + segLen / 2);
+                    const ox = side.ry === 0 ? offAlong : 0;
+                    const oz = side.ry === 0 ? 0 : offAlong;
+                    seg.position.set(zone.pos.x + side.x + ox, wallH / 2, zone.pos.z + side.z + oz);
+                    seg.rotation.y = side.ry;
+                    seg.castShadow = true;
+                    seg.receiveShadow = true;
+                    scene.add(seg);
+                    group.add(seg);
+                    const wrec = { mesh: seg, health: WALL_HP, maxHealth: WALL_HP, position: seg.position, shelterKey: zoneKey };
+                    walls.push(wrec);
+                    if (typeof registerCollider === 'function') registerCollider(wrec.position, segLen / 2 * 0.9, wrec, 'wall', false);
+                });
+                // Marco de puerta destruido/abierto + puerta de supervivientes.
+                const frame = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.4, 0.7), frameMat);
+                frame.position.set(zone.pos.x + side.x, wallH + 0.2, zone.pos.z + side.z);
+                frame.rotation.y = side.ry;
+                scene.add(frame);
+                group.add(frame);
+                createSurvivorDoor(zoneKey, zone.pos.x + side.x, zone.pos.z + side.z, side.ry);
+                // Ventanas destruidas: solo marco roto arriba, sin cristal que bloquee.
                 [-3.4, 3.4].forEach(off => {
-                    const win = new THREE.Mesh(new THREE.BoxGeometry(1.6, 1.0, 0.6), glassMat);
+                    const broken = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.25, 0.6), frameMat);
                     const ox = side.ry === 0 ? off : 0;
                     const oz = side.ry === 0 ? 0 : off;
-                    win.position.set(wall.position.x + ox, 1.6, wall.position.z + oz);
-                    win.rotation.y = side.ry;
-                    scene.add(win);
-                    group.add(win);
+                    broken.position.set(zone.pos.x + side.x + ox, wallH + 0.1, zone.pos.z + side.z + oz);
+                    broken.rotation.y = side.ry;
+                    broken.rotation.z = 0.2;
+                    scene.add(broken);
+                    group.add(broken);
                 });
-                walls.push({ mesh: wall, health: WALL_HP, maxHealth: WALL_HP, position: wall.position, shelterKey: zoneKey });
+                // Fortaleza nv3: segunda linea de muros bajos (refuerzo perimetral).
+                if (lv >= 3) {
+                    const outer = new THREE.Mesh(new THREE.BoxGeometry(segLen, 1.4, 0.4), wallMat);
+                    const ox2 = side.ry === 0 ? 0 : side.x * 0.4;
+                    const oz2 = side.ry === 0 ? side.z * 0.4 : 0;
+                    outer.position.set(zone.pos.x + side.x + ox2, 0.7, zone.pos.z + side.z + oz2);
+                    outer.rotation.y = side.ry;
+                    scene.add(outer);
+                    const orec = { mesh: outer, health: WALL_HP, maxHealth: WALL_HP, position: outer.position, shelterKey: zoneKey };
+                    walls.push(orec);
+                    if (typeof registerCollider === 'function') registerCollider(orec.position, segLen / 2 * 0.9, orec, 'wall', false);
+                }
             });
-            // Losa de suelo
-            const slab = new THREE.Mesh(new THREE.BoxGeometry(15, 0.2, 15),
+            // Losa de suelo (mas grande con nivel)
+            const slabSize = lv === 1 ? 11 : 15;
+            const slab = new THREE.Mesh(new THREE.BoxGeometry(slabSize, 0.2, slabSize),
                 new THREE.MeshStandardMaterial({ color: 0x475569, roughness: 0.9 }));
             slab.position.set(zone.pos.x, 0.1, zone.pos.z);
             slab.receiveShadow = true;
@@ -433,6 +497,36 @@
             group.add(slab);
             scene.add(group);
             return group;
+        }
+        // Mini-casa desde 0 (nivel 1) para hacerla crecer a fortaleza.
+        function createMiniShelter(zoneKey) {
+            customShelters[zoneKey] = true;
+            return createShelterHouse(zoneKey, 1);
+        }
+        // Mejora 1->2->3 con trabajo colectivo (exceso de materiales queda dentro).
+        function upgradeShelterLevel(zoneKey) {
+            const cur = shelterLevels[zoneKey] || 1;
+            if (cur >= 3) return false;
+            // Retira muros viejos de ese refugio para reconstruir mas grande.
+            for (let i = walls.length - 1; i >= 0; i--) {
+                if (walls[i].shelterKey === zoneKey) {
+                    scene.remove(walls[i].mesh);
+                    if (typeof unregisterColliderForRef === 'function') unregisterColliderForRef(walls[i]);
+                    walls.splice(i, 1);
+                }
+            }
+            for (let i = doors.length - 1; i >= 0; i--) {
+                if (doors[i].shelterKey === zoneKey) {
+                    scene.remove(doors[i].mesh);
+                    if (typeof unregisterColliderForRef === 'function') unregisterColliderForRef(doors[i]);
+                    doors.splice(i, 1);
+                }
+            }
+            createShelterHouse(zoneKey, cur + 1);
+            addLogEvent(`${ZONES[zoneKey].name} mejorado a nivel ${cur + 1}/3 (${cur + 1 === 3 ? 'fortaleza impenetrable' : 'casa reforzada'}). Exceso almacenado dentro.`);
+            showToast(`Refugio nivel ${cur + 1}/3.`);
+            updateUI();
+            return true;
         }
 
         function shelterWallCount(zoneKey) {
