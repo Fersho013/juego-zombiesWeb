@@ -355,8 +355,8 @@
                             moveTowards(s, homeZone.pos, 0.1);
                         }
                     } else {
-                        // TAREA GRUPAL: si hay obra colectiva activa, todos la
-                        // terminan juntos antes de empezar otra (no multitarea).
+                        // ORDEN 1-7: una sola tarea grupal; se termina al 100%
+                        // antes de la siguiente (paso 3 = recolectar todo).
                         const directive = getGroupDirective();
                         if (directive && directive.kind === 'repair') {
                             updateShelterRepair(s, delta);
@@ -364,6 +364,39 @@
                             updateShelterFound(s, delta);
                         } else if (directive && directive.kind === 'tower') {
                             updateTowerWork(s, delta, homeZone);
+                        } else if (directive && directive.kind === 'turret-base') {
+                            updateBaseTurretTask(s);
+                        } else if (directive && directive.kind === 'collect') {
+                            // Paso 3: todos a recolectar, cada quien su caja.
+                            if (!s.targetCrate || s.targetCrate.isPickedUp || isCrateClaimed(s.targetCrate, s)) {
+                                s.targetCrate = findClosestAvailableCrate(s.position, s);
+                                s.targetLoot = null;
+                            }
+                            if (s.targetCrate) {
+                                s.thoughtText = `Recolectando ${s.targetCrate.config.name} (paso 3)`;
+                                const distToCrate = s.position.distanceTo(s.targetCrate.position);
+                                if (distToCrate < 1.5) {
+                                    pickupCrate(s, s.targetCrate);
+                                    s.targetCrate = null;
+                                    if (countAvailableCrates() === 0 && groupTask && groupTask.kind === 'collect') groupTask = null;
+                                } else {
+                                    moveTowards(s, s.targetCrate.position, 0.11);
+                                }
+                            } else {
+                                // Sin caja libre: loot exclusivo o llevar lo cargado.
+                                if (!s.targetLoot || !loots.includes(s.targetLoot) || isLootClaimed(s.targetLoot, s)) {
+                                    s.targetLoot = findClosestAvailableLoot(s.position, s);
+                                }
+                                if (s.targetLoot) {
+                                    const dL = s.position.distanceTo(s.targetLoot.position);
+                                    s.thoughtText = `Recogiendo suministro (paso 3)...`;
+                                    if (dL < 1.6) { collectLoot(s, s.targetLoot); s.targetLoot = null; }
+                                    else moveTowards(s, s.targetLoot.position, 0.11);
+                                } else {
+                                    s.thoughtText = 'Buscando materiales...';
+                                    moveTowards(s, homeZone.pos, 0.08);
+                                }
+                            }
                         } else {
                             // Sin obra grupal: cada quien su propia caja (reserva exclusiva).
                             if (!s.targetCrate || s.targetCrate.isPickedUp || isCrateClaimed(s.targetCrate, s)) {
@@ -419,9 +452,10 @@
             maybeExpandShelters();
         }
 
-        // Intenta abrir un nuevo refugio simultáneo cuando hay recursos y
-        // supervivientes suficientes para cubrir más terreno de la ciudad.
+        // Expansión aleatoria DESACTIVADA: el orden oficial (paso 2) controla
+        // la fundación para evitar obras simultáneas y el limbo.
         function maybeExpandShelters() {
+            return; // fundar solo vía getGroupDirective() paso FOUND
             if (isWaveActive) return;
             if (activeShelterKeys.length >= Math.min(4, Object.keys(ZONES).length)) return;
             const aliveCount = survivors.filter(s => s.health > 0).length;
@@ -546,55 +580,160 @@
         }
 
         // ==========================================================
-        // TAREA GRUPAL: todos terminan la misma obra antes de otra.
-        // Prioridad: reparar > fundar refugio > construir torre.
+        // ORDEN OFICIAL DEL EQUIPO (pasos 1-7, sin limbo):
+        // 1 MAIN > 2 FOUND + 2 TURRETAS BASE > 3 COLLECT TODO > 4 REPAIR
+        // (1 a la vez al 100%) > 5 FIRST-TOWER > 6 REQUEST > 7 MORE-TOWERS.
+        // Una sola obra grupal activa; se termina al 100% antes de otra.
         // ==========================================================
+        function ensureMainShelter() {
+            if (typeof mainShelterKey === 'undefined') return 'MALL';
+            const mz = ZONES[mainShelterKey];
+            if (mz && mz.isActiveShelter && mz.intact) return mainShelterKey;
+            const fallback = activeShelterKeys[0] || 'MALL';
+            if (mainShelterKey !== fallback) {
+                mainShelterKey = fallback;
+                addLogEvent(`Refugio principal definido: ${ZONES[fallback].name} (paso 1 del plan).`);
+                if (typeof renderSheltersPanel === 'function') renderSheltersPanel();
+            }
+            return mainShelterKey;
+        }
+
+        function countBaseTurrets() {
+            return activeShelterKeys.filter(k => ZONES[k] && ZONES[k].turret).length;
+        }
+
+        function countAvailableCrates() {
+            return crates.filter(c => !c.isPickedUp).length;
+        }
+
+        function setOrderPhase(p) {
+            if (typeof orderPhase === 'undefined') return;
+            if (orderPhase !== p) {
+                orderPhase = p;
+                if (typeof updateUI === 'function') updateUI();
+            }
+        }
+
         function getGroupDirective() {
             if (isWaveActive) return null;
+            ensureMainShelter(); // paso 1 siempre garantizado
+            setOrderPhase('MAIN');
+
+            // Validar bloqueo actual: solo sigue si su objetivo sigue vigente.
             if (typeof groupTask !== 'undefined' && groupTask) {
                 if (groupTask.kind === 'repair') {
-                    const t = (typeof mostDamagedShelter === 'function') ? mostDamagedShelter() : null;
-                    if (!t || t.key !== groupTask.key) groupTask = null;
-                    else return groupTask;
+                    // Sigue solo si ese refugio aun no esta al 100%.
+                    if (typeof shelterRepairPct === 'function' && shelterRepairPct(groupTask.key) >= 100) groupTask = null;
+                    else if (!activeShelterKeys.includes(groupTask.key)) groupTask = null;
+                    else { setOrderPhase('REPAIR'); return groupTask; }
                 } else if (groupTask.kind === 'found') {
                     if (typeof shelterFounder === 'undefined' || !shelterFounder) groupTask = null;
-                    else return groupTask;
+                    else { setOrderPhase('FOUND'); return groupTask; }
                 } else if (groupTask.kind === 'tower') {
                     const site = towers.find(t => !t.complete && t.id === groupTask.siteId);
                     if (!site) groupTask = null;
-                    else return groupTask;
+                    else { setOrderPhase(towers.some(t => t.complete) ? 'MORE-TOWERS' : 'FIRST-TOWER'); return groupTask; }
+                } else if (groupTask.kind === 'turret-base') {
+                    if (countBaseTurrets() >= ORDER_MIN_TURRETS) groupTask = null;
+                    else { setOrderPhase('TURRETS'); return groupTask; }
+                } else if (groupTask.kind === 'collect') {
+                    if (countAvailableCrates() === 0) groupTask = null;
+                    else { setOrderPhase('COLLECT'); return groupTask; }
                 } else {
                     groupTask = null;
                 }
             }
+
+            // PASO 2a: fundar hasta tener minimo 2 refugios (o terminar fundacion en curso).
+            if (typeof shelterFounder !== 'undefined' && shelterFounder) {
+                groupTask = { kind: 'found', key: shelterFounder.zoneKey };
+                setOrderPhase('FOUND');
+                return groupTask;
+            }
+            const aliveN = survivors.filter(o => o.health > 0).length;
+            const canFound = aliveN >= 3 && activeShelterKeys.length < ORDER_MIN_SHELTERS &&
+                baseResources.ammo >= SHELTER_FOUND_COST.ammo && baseResources.food >= SHELTER_FOUND_COST.food &&
+                Object.keys(ZONES).some(k => !ZONES[k].isActiveShelter && ZONES[k].intact);
+            if (canFound) {
+                groupTask = { kind: 'found', key: null };
+                setOrderPhase('FOUND');
+                return groupTask;
+            }
+
+            // PASO 2b: al menos 2 torretas base (una por refugio idealmente).
+            if (countBaseTurrets() < Math.min(ORDER_MIN_TURRETS, activeShelterKeys.length)) {
+                groupTask = { kind: 'turret-base', key: null };
+                setOrderPhase('TURRETS');
+                return groupTask;
+            }
+
+            // PASO 3: recolectar TODOS los materiales del mapa antes de obra.
+            if (countAvailableCrates() > 0) {
+                groupTask = { kind: 'collect', key: null };
+                setOrderPhase('COLLECT');
+                return groupTask;
+            }
+
+            // PASO 4: reparar UN refugio a la vez hasta el 100% (bloqueo anti-limbo).
             if (typeof mostDamagedShelter === 'function' && mostDamagedShelter()) {
                 const t = mostDamagedShelter();
                 groupTask = { kind: 'repair', key: t.key };
+                setOrderPhase('REPAIR');
                 return groupTask;
             }
-            if (typeof shelterFounder !== 'undefined' && shelterFounder) {
-                groupTask = { kind: 'found', key: shelterFounder.zoneKey };
-                return groupTask;
-            }
-            // Fundacion pendiente por recursos: agrupar para fundar juntos.
-            const aliveN = survivors.filter(o => o.health > 0).length;
-            if (aliveN >= 3 && activeShelterKeys.length < 4 &&
-                baseResources.ammo >= SHELTER_FOUND_COST.ammo && baseResources.food >= SHELTER_FOUND_COST.food &&
-                Object.keys(ZONES).some(k => !ZONES[k].isActiveShelter && ZONES[k].intact)) {
-                groupTask = { kind: 'found', key: null };
-                return groupTask;
-            }
-            // Torres ilimitadas: una sola obra activa, todo el equipo a la misma.
-            let site = towers.find(t => !t.complete) || null;
+
+            // PASO 5 y 7: torres (primera y luego ilimitadas, una obra a la vez).
+            const site = towers.find(t => !t.complete) || null;
             if (site) {
                 groupTask = { kind: 'tower', siteId: site.id, key: site.zoneKey };
+                setOrderPhase(towers.some(t => t.complete) ? 'MORE-TOWERS' : 'FIRST-TOWER');
                 return groupTask;
             }
+            const completeN = towers.filter(t => t.complete).length;
             if (baseResources.ammo >= 1) {
                 groupTask = { kind: 'tower', siteId: null, key: null };
+                setOrderPhase(completeN < 1 ? 'FIRST-TOWER' : 'MORE-TOWERS');
                 return groupTask;
             }
+
+            // PASO 6: sin materiales ni obra posible -> solicitar ayuda.
+            if (typeof requestSupplyHelp === 'function') requestSupplyHelp('materiales para seguir construyendo');
+            setOrderPhase('REQUEST');
             return null;
+        }
+
+        // Paso 2b: construir la torreta base faltante (consume 1 heavy si hay).
+        function updateBaseTurretTask(s) {
+            if (isWaveActive) return false;
+            const missing = activeShelterKeys.find(k => ZONES[k] && !ZONES[k].turret);
+            if (!missing) {
+                if (typeof groupTask !== 'undefined' && groupTask && groupTask.kind === 'turret-base') groupTask = null;
+                return false;
+            }
+            const zone = ZONES[missing];
+            const d = s.position.distanceTo(zone.pos);
+            if (d > 5) {
+                s.thoughtText = `Yendo a instalar torreta en ${zone.name} (paso 2)...`;
+                moveTowards(s, zone.pos, 0.11);
+                return true;
+            }
+            s.isMoving = false;
+            s.hammering = true;
+            aimTowards(s, zone.pos);
+            s.thoughtText = `Instalando torreta en ${zone.name}...`;
+            // Requiere 1 heavy como materiales; si no hay, pide suministros.
+            if (!zone.turret) {
+                if (baseResources.heavy >= 1) {
+                    buildTurretAt(missing, false);
+                    addLogEvent(`${s.name} instaló torreta base en ${zone.name} (${countBaseTurrets()}/${ORDER_MIN_TURRETS}).`);
+                    if (countBaseTurrets() >= ORDER_MIN_TURRETS && groupTask && groupTask.kind === 'turret-base') groupTask = null;
+                    updateUI();
+                } else {
+                    if (typeof requestSupplyHelp === 'function') requestSupplyHelp('pesadas para torretas');
+                    s.thoughtText = `Esperando materiales para torreta...`;
+                }
+            }
+            return true;
         }
 
         function pickupCrate(survivor, crate) {
@@ -885,11 +1024,26 @@
             return best;
         }
 
-        // Tras la oleada: reconstruir salud y muros con barra "Reconstruyendo"
+        // Paso 4: UN refugio a la vez hasta el 100% (bloqueo anti-limbo:
+        // se respeta groupTask.key aunque otro parezca mas dañado).
         function updateShelterRepair(s, delta) {
             if (isWaveActive) return false;
-            const target = mostDamagedShelter();
-            if (!target) return false;
+            let target = null;
+            if (typeof groupTask !== 'undefined' && groupTask && groupTask.kind === 'repair' && ZONES[groupTask.key]) {
+                target = { key: groupTask.key, zone: ZONES[groupTask.key] };
+                // Si ya llego al 100%, liberar bloqueo y no trabajar mas aqui.
+                if (typeof shelterRepairPct === 'function' && shelterRepairPct(target.key) >= 100) {
+                    groupTask = null;
+                    return false;
+                }
+                if (!activeShelterKeys.includes(target.key)) { groupTask = null; return false; }
+            } else {
+                target = mostDamagedShelter();
+            }
+            if (!target) {
+                if (typeof groupTask !== 'undefined' && groupTask && groupTask.kind === 'repair') groupTask = null;
+                return false;
+            }
             const d = s.position.distanceTo(target.zone.pos);
             if (d > target.zone.radius * 0.7) {
                 s.thoughtText = `Yendo a reconstruir ${target.zone.name}...`;
@@ -922,8 +1076,12 @@
                 }
             }
             const pct = shelterRepairPct(target.key);
-            s.thoughtText = `Reconstruyendo ${target.zone.name} ${pct}%`;
+            s.thoughtText = `Reconstruyendo ${target.zone.name} ${pct}% (paso 4)`;
             s.repairKey = target.key;
+            if (pct >= 100 && typeof groupTask !== 'undefined' && groupTask && groupTask.kind === 'repair' && groupTask.key === target.key) {
+                groupTask = null; // 100% completado: liberar para la siguiente tarea
+                addLogEvent(`${target.zone.name} reconstruido al 100%. Pasando a la siguiente tarea del plan.`);
+            }
             return true;
         }
 
@@ -989,6 +1147,7 @@
             if (shelterFounder.progress >= shelterFounder.required) {
                 const key = shelterFounder.zoneKey;
                 shelterFounder = null;
+                if (typeof groupTask !== 'undefined' && groupTask && groupTask.kind === 'found') groupTask = null;
                 activateShelter(key, false);
                 createShelterHouse(key);
                 if (baseResources.heavy >= 1) buildTurretAt(key, false);
