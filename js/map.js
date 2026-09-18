@@ -124,6 +124,23 @@
             });
 
             scene.add(housesGroup);
+
+            // Colisiones del entorno: nadie atraviesa pilares, autos, arboles, fuente ni casas.
+            if (typeof registerCollider === 'function') {
+                [[-15, -13], [15, -13], [-15, 13], [15, 13]].forEach(p => {
+                    registerCollider(new THREE.Vector3(p[0], 0, p[1]), 1.2, { id: `mall-pillar-${p[0]}-${p[1]}` }, 'env', false);
+                });
+                [[-10, -10], [8, -12], [-8, 10], [10, 8], [-15, 2], [15, -2]].forEach(p => {
+                    registerCollider(new THREE.Vector3(60 + p[0], 0, p[1]), 2.2, { id: `car-${p[0]}-${p[1]}`, hp: 60 }, 'env', false);
+                });
+                registerCollider(new THREE.Vector3(-60, 0, 0), 4.2, { id: 'fountain' }, 'env', false);
+                [[-12, -12], [14, -10], [-10, 12], [12, 14], [0, -14]].forEach(p => {
+                    registerCollider(new THREE.Vector3(-60 + p[0], 0, p[1]), 1.0, { id: `tree-${p[0]}-${p[1]}` }, 'env', false);
+                });
+                [-25, 0, 25].forEach(x => {
+                    registerCollider(new THREE.Vector3(x, 0, -65), 7.5, { id: `house-${x}`, hp: 120 }, 'env', false);
+                });
+            }
         }
 
         // Dispersa escombros, autos quemados, muros caídos y ruinas menores
@@ -167,6 +184,11 @@
                 obj.position.set(x, 0, z);
                 obj.rotation.y = rnd() * Math.PI * 2;
                 scene.add(obj);
+                // Ruinas destructibles: los zombies las rompen si bloquean el paso.
+                if (typeof registerCollider === 'function') {
+                    const ref = { id: `ruin-${placed}`, hp: 50, mesh: obj };
+                    registerCollider(new THREE.Vector3(x, 0, z), 1.8, ref, 'env', true);
+                }
                 placed++;
             }
 
