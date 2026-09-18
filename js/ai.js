@@ -138,6 +138,8 @@
                 if (s.health <= 0) { updateFallenSurvivor(s, delta); return; }
 
                 s.shootCooldown = Math.max(0, s.shootCooldown - delta);
+                s.grenadeCooldown = Math.max(0, (s.grenadeCooldown || 0) - delta * gameSpeed);
+                s.craftCooldown = Math.max(0, (s.craftCooldown || 0) - delta * gameSpeed);
 
                 let nearestZombie = null;
                 let minDist = 999;
@@ -149,9 +151,14 @@
                     }
                 });
 
-                if (nearestZombie && minDist < 30 && s.aiState !== 'FLEE') {
+                const wconf = WEAPONS[s.primary] || WEAPONS.PISTOL;
+                if (nearestZombie && minDist < wconf.range && s.aiState !== 'FLEE') {
                     aimTowards(s, nearestZombie.position);
-                    if (s.shootCooldown <= 0 && s.ammo > 0) {
+                    // Granada si hay grupo compacto y tiene stock
+                    if (s.grenades > 0 && s.grenadeCooldown <= 0 && minDist < 16 && countNearbyZombies(nearestZombie.position, 6) >= 3) {
+                        throwGrenade(s, nearestZombie.position);
+                        s.thoughtText = `¡Granada fuera! (${s.grenades} restantes)`;
+                    } else if (s.shootCooldown <= 0 && s.ammo > 0) {
                         fireSurvivorWeapon(s, nearestZombie);
                     }
                 }
@@ -227,9 +234,16 @@
                                 moveTowards(s, s.targetCrate.position, 0.11);
                             }
                         } else {
-                            s.thoughtText = "Patrullando perímetro...";
-                            const patrolPos = homeZone.pos.clone().add(new THREE.Vector3(Math.cos(s.id + clock.getElapsedTime() * 0.5) * 10, 0, Math.sin(s.id + clock.getElapsedTime() * 0.5) * 10));
-                            moveTowards(s, patrolPos, 0.08);
+                            // Sin cajas: fabricar con excedente o construir barricada
+                            if (maybeCraftSupplyCrate(s)) {
+                                // fabricada este frame
+                            } else if (updateSurvivorBuild(s, delta, homeZone)) {
+                                // construyendo este frame
+                            } else {
+                                s.thoughtText = "Patrullando perímetro...";
+                                const patrolPos = homeZone.pos.clone().add(new THREE.Vector3(Math.cos(s.id + clock.getElapsedTime() * 0.5) * 10, 0, Math.sin(s.id + clock.getElapsedTime() * 0.5) * 10));
+                                moveTowards(s, patrolPos, 0.08);
+                            }
                         }
                     }
                 }
@@ -348,20 +362,95 @@
             if (!survivor.carriedCrate) return;
             const crateType = survivor.carriedCrate.typeKey;
 
-            if (crateType === 'WEAPON') baseResources.ammo += 2;
+            if (crateType === 'WEAPON') { baseResources.ammo += 2; survivor.ammo = Math.min(250, survivor.ammo + 50); }
             else if (crateType === 'MED') baseResources.meds += 2;
             else if (crateType === 'FOOD') baseResources.food += 2;
             else if (crateType === 'HEAVY') baseResources.heavy += 1;
+            // Nuevo arsenal: la caja otorga el arma directamente al portador
+            else if (crateType === 'RIFLE') { equipPrimary(survivor, 'RIFLE'); survivor.ammo = Math.min(250, survivor.ammo + 80); baseResources.ammo += 1; }
+            else if (crateType === 'SHOTGUN') { equipPrimary(survivor, 'SHOTGUN'); survivor.ammo = Math.min(250, survivor.ammo + 40); baseResources.ammo += 1; }
+            else if (crateType === 'SNIPER') { equipPrimary(survivor, 'SNIPER'); survivor.ammo = Math.min(250, survivor.ammo + 30); baseResources.ammo += 1; }
+            else if (crateType === 'GRENADE') { survivor.grenades = Math.min(8, survivor.grenades + 3); survivor.heavy = `Granadas (${survivor.grenades})`; baseResources.heavy += 1; }
 
             addLogEvent(`${survivor.name} entregó ${survivor.carriedCrate.config.name} al Refugio.`);
             survivor.carriedCrate = null;
             survivor.targetCrate = null;
 
             survivor.health = Math.min(survivor.maxHealth, survivor.health + 20);
-            survivor.ammo = Math.min(200, survivor.ammo + 50);
+            if (crateType === 'MED' || crateType === 'FOOD') survivor.ammo = Math.min(250, survivor.ammo + 50);
 
             playSound('pickup');
             updateUI();
+        }
+
+        function equipPrimary(survivor, weaponKey) {
+            const w = WEAPONS[weaponKey];
+            if (!w) return;
+            survivor.primary = weaponKey;
+            survivor.weapon = w.label;
+            addLogEvent(`${survivor.name} equipo ${w.label}.`);
+        }
+
+        // Si el superviviente tiene exceso, fabrica su propia caja en el refugio
+        function maybeCraftSupplyCrate(s) {
+            if (s.craftCooldown > 0 || s.carriedCrate || s.health <= 0) return false;
+            const hasSpareGun = (s.primary !== 'PISTOL' && s.ammo > 170);
+            const hasSpareNades = (s.grenades >= 6);
+            if (!hasSpareGun && !hasSpareNades) return false;
+            const homeZone = ZONES[s.homeZoneKey];
+            if (!homeZone || s.position.distanceTo(homeZone.pos) > 8) return false;
+
+            const type = hasSpareNades ? 'GRENADE' : 'WEAPON';
+            const cx = homeZone.pos.x + (Math.random() * 6 - 3);
+            const cz = homeZone.pos.z + (Math.random() * 6 - 3);
+            spawnCrate(type, cx, cz);
+            if (hasSpareNades) { s.grenades -= 3; s.heavy = `Granadas (${s.grenades})`; }
+            else { s.ammo -= 60; }
+            s.craftCooldown = 25;
+            s.thoughtText = `Fabrico ${CRATE_TYPES[type].name} para el refugio`;
+            addLogEvent(`${s.name} fabrico una ${CRATE_TYPES[type].name} con su excedente.`);
+            updateUI();
+            return true;
+        }
+
+        // Construccion de barricadas por supervivientes cerca del refugio
+        function findBarricadeSpot(zone) {
+            const ang = Math.random() * Math.PI * 2;
+            const r = zone.radius * 0.55 + 4 + Math.random() * 3;
+            return new THREE.Vector3(zone.pos.x + Math.cos(ang) * r, 0, zone.pos.z + Math.sin(ang) * r);
+        }
+
+        function updateSurvivorBuild(s, delta, homeZone) {
+            // Iniciar construccion: sin oleada, con recurso y cerca de base
+            if (!s.buildTarget) {
+                if (isWaveActive) return false;
+                if (baseResources.ammo < 1) return false;
+                if (s.role !== 'Ingeniero' && Math.random() > 0.004 * gameSpeed) return false;
+                if (nearestBarricade(s.position, 6)) return false;
+                s.buildTarget = findBarricadeSpot(homeZone);
+                s.buildProgress = 0;
+                s.thoughtText = 'Buscando punto para barricada...';
+            }
+            const d = s.position.distanceTo(s.buildTarget);
+            if (d > 2) {
+                s.thoughtText = 'Llevando materiales para barricada...';
+                moveTowards(s, s.buildTarget, 0.11);
+                return true;
+            }
+            // Construyendo in-situ (~3s)
+            s.isMoving = false;
+            aimTowards(s, homeZone.pos);
+            s.buildProgress += delta * gameSpeed;
+            s.thoughtText = `Construyendo barricada ${Math.min(99, Math.round(s.buildProgress / 3 * 100))}%`;
+            if (s.buildProgress >= 3) {
+                baseResources.ammo = Math.max(0, baseResources.ammo - 1);
+                createSurvivorBarricade(s.buildTarget.x, s.buildTarget.z, false);
+                addLogEvent(`${s.name} construyo una barricada cerca de ${homeZone.name}.`);
+                s.buildTarget = null;
+                s.buildProgress = 0;
+                updateUI();
+            }
+            return true;
         }
 
         // ==========================================================
@@ -386,6 +475,24 @@
                 if (z.health <= 0) continue;
 
                 z.attackCooldown = Math.max(0, z.attackCooldown - delta);
+
+                // Barricada bloqueando el paso: el zombie la golpea primero
+                const block = nearestBarricade(z.position, 2.8);
+                if (block && z.attackCooldown <= 0) {
+                    block.health -= z.damage * 0.6;
+                    z.attackCooldown = 1.2;
+                    z.isMoving = false;
+                    aimTowards(z, block.position);
+                    createMuzzleFlash(block.position, 0x92400e, 0.08);
+                    if (block.health <= 0) {
+                        scene.remove(block.mesh);
+                        const bi = barricades.indexOf(block);
+                        if (bi > -1) barricades.splice(bi, 1);
+                        addLogEvent('Una barricada ha sido destruida por la horda.');
+                    }
+                    animateEntityLimbs(z, delta);
+                    continue;
+                }
 
                 let targetSurvivor = null;
                 let minDist = 999;
