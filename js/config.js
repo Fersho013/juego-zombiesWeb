@@ -189,28 +189,56 @@
                 }
             }
         }
-        // Movimiento con rodeo: si choca de frente, desliza lateral ( elected ).
+        // Rutas distintas: cada unidad tiene carril lateral propio para no ir
+        // todas por la misma linea y bloquearse entre si.
+        function getLaneFor(entity) {
+            if (entity._laneSide === undefined) {
+                const id = (entity.id !== undefined) ? entity.id : Math.floor(Math.random() * 100);
+                entity._laneSide = (id % 2 === 0) ? 1 : -1;
+                entity._laneAmt = 0.3 + (Math.abs(id) % 3) * 0.18;
+            }
+            return { side: entity._laneSide, amt: entity._laneAmt };
+        }
+        // Movimiento con rodeo + carril propio + desvio temporal si hay _detour.
         // Devuelve true si avanzo.
         function tryMoveWithCollisions(entity, targetPos, step, isSurvivor) {
             const ox = entity.position.x, oz = entity.position.z;
-            const dir = new THREE.Vector3().subVectors(targetPos, entity.position);
-            dir.y = 0;
-            if (dir.length() < 0.15) return false;
-            dir.normalize();
+            // Si hay desvio activo por estancamiento, ir al desvio primero.
+            let goal = targetPos;
+            if (entity._detour && entity._detourTimer > 0) {
+                goal = entity._detour;
+                entity._detourTimer--;
+                if (entity._detourTimer <= 0) entity._detour = null;
+            }
+            const toGoal = new THREE.Vector3().subVectors(goal, entity.position);
+            toGoal.y = 0;
+            const distToGoal = toGoal.length();
+            if (distToGoal < 0.15) return false;
+            toGoal.normalize();
+            // Carril lateral: se atenua al llegar (últimos 3m van directo al punto).
+            const lane = getLaneFor(entity);
+            const laneW = distToGoal > 3 ? lane.amt : lane.amt * (distToGoal / 3) * 0.4;
+            const dir = new THREE.Vector3(
+                toGoal.x + (-toGoal.z) * lane.side * laneW,
+                0,
+                toGoal.z + (toGoal.x) * lane.side * laneW
+            ).normalize();
             entity.position.x += dir.x * step;
             entity.position.z += dir.z * step;
             resolveEntityCollisions(entity, isSurvivor);
             // Si casi no avanzo (bloqueado), intenta rodear en perpendicular.
             const moved = Math.hypot(entity.position.x - ox, entity.position.z - oz);
             if (moved < step * 0.3) {
-                const side = new THREE.Vector3(-dir.z, 0, dir.x);
-                entity.position.x = ox + side.x * step;
-                entity.position.z = oz + side.z * step;
+                const side = new THREE.Vector3(-toGoal.z, 0, toGoal.x);
+                // Alterna el lado segun el carril propio para no chocar todos igual.
+                const s = (lane.side >= 0) ? side : side.clone().negate();
+                entity.position.x = ox + s.x * step;
+                entity.position.z = oz + s.z * step;
                 resolveEntityCollisions(entity, isSurvivor);
                 const moved2 = Math.hypot(entity.position.x - ox, entity.position.z - oz);
                 if (moved2 < step * 0.3) {
-                    entity.position.x = ox - side.x * step;
-                    entity.position.z = oz - side.z * step;
+                    entity.position.x = ox - s.x * step;
+                    entity.position.z = oz - s.z * step;
                     resolveEntityCollisions(entity, isSurvivor);
                 }
             }
@@ -218,6 +246,7 @@
         }
 
         // Hitbox propia por unidad: nadie se apila (mundo + compañeros).
+        // Si uno trabaja (hammering) el otro se aparta; dos trabajando no se pelean.
         const ENTITY_RADIUS = 0.55;
         function separateEntities() {
             // Supervivientes entre si + contra zombies vivos.
@@ -227,6 +256,7 @@
                 for (let j = i + 1; j < survivors.length; j++) {
                     const b = survivors[j];
                     if (!b || b.health <= 0 || !b.position) continue;
+                    if (a.hammering && b.hammering) continue;
                     pushApart(a, b, ENTITY_RADIUS * 2);
                 }
                 for (const z of zombies) {
@@ -258,14 +288,28 @@
             const dx = b.position.x - a.position.x;
             const dz = b.position.z - a.position.z;
             const d = Math.hypot(dx, dz);
-            if (d >= minD || d < 0.001) {
-                if (d < 0.001) { b.position.x += minD / 2; b.position.z += minD / 2; a.position.x -= minD / 2; a.position.z -= minD / 2; }
+            if (d >= minD) return;
+            if (d < 0.001) {
+                // Spawn identico: separacion determinista por id para no vibrar.
+                const ida = (a.id !== undefined) ? a.id : 0;
+                const ang = (ida * 2.4) % (Math.PI * 2);
+                b.position.x += Math.cos(ang) * minD / 2; b.position.z += Math.sin(ang) * minD / 2;
+                a.position.x -= Math.cos(ang) * minD / 2; a.position.z -= Math.sin(ang) * minD / 2;
                 return;
             }
-            const push = (minD - d) / 2;
+            // El que trabaja se queda; el otro se aparta (evita sacar obreros del tajo).
+            const aWork = !!a.hammering, bWork = !!b.hammering;
+            const push = (minD - d);
             const nx = dx / d, nz = dz / d;
-            a.position.x -= nx * push; a.position.z -= nz * push;
-            b.position.x += nx * push; b.position.z += nz * push;
+            if (aWork && !bWork) {
+                b.position.x += nx * push; b.position.z += nz * push;
+            } else if (bWork && !aWork) {
+                a.position.x -= nx * push; a.position.z -= nz * push;
+            } else {
+                const h = push / 2;
+                a.position.x -= nx * h; a.position.z -= nz * h;
+                b.position.x += nx * h; b.position.z += nz * h;
+            }
         }
 
         // Audio Synthesizer Engine
