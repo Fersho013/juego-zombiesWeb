@@ -83,6 +83,7 @@
             HEAVY: { name: 'Caja Armas Pesadas', color: 0xef4444, icon: 'fa-bomb', type: 'heavy' },
             MED: { name: 'Caja de Curaciones', color: 0x10b981, icon: 'fa-kit-medical', type: 'med' },
             FOOD: { name: 'Caja de Comida', color: 0x3b82f6, icon: 'fa-utensils', type: 'food' },
+            ARMOR: { name: 'Caja de Blindaje', color: 0x64748b, icon: 'fa-shield-halved', type: 'armor' },
             RIFLE: { name: 'Caja Rifle de Asalto', color: 0xfbbf24, icon: 'fa-gun', type: 'rifle' },
             SHOTGUN: { name: 'Caja Escopeta', color: 0xfb923c, icon: 'fa-burst', type: 'shotgun' },
             SNIPER: { name: 'Caja Francotirador', color: 0x38bdf8, icon: 'fa-crosshairs', type: 'sniper' },
@@ -147,6 +148,7 @@
                 { type: 'FOOD', x: 0, z: -58 },
                 { type: 'RIFLE', x: 12, z: -12 },
                 { type: 'SHOTGUN', x: -12, z: 12 },
+                { type: 'ARMOR', x: 4, z: 14 },
                 { type: 'GRENADE', x: 58, z: 6 },
                 { type: 'SNIPER', x: -58, z: -14 },
                 { type: 'RIFLE', x: 0, z: -52 }
@@ -161,11 +163,11 @@
         // ==========================================================
         function initSurvivors() {
             const survivorConfigs = [
-                { name: 'Alex', role: 'Líder', color: 0xef4444, weapon: 'Rifle de Asalto', primary: 'RIFLE', melee: 'Machete Tactico', heavy: 'Granadas (3)', grenades: 3 },
-                { name: 'Elena', role: 'Médico', color: 0x10b981, weapon: 'Escopeta Calibre 12', primary: 'SHOTGUN', melee: 'Cuchillo Caza', heavy: 'Ninguna', grenades: 1 },
-                { name: 'Marcus', role: 'Pesado', color: 0xf59e0b, weapon: 'Ametralladora', primary: 'SMG', melee: 'Hacha de Mano', heavy: 'Bazuka RP3', grenades: 4 },
-                { name: 'Sarah', role: 'Tiradora', color: 0x3b82f6, weapon: 'Rifle Precisión', primary: 'SNIPER', melee: 'Machete', heavy: 'Granadas (2)', grenades: 2 },
-                { name: 'Carlos', role: 'Ingeniero', color: 0x8b5cf6, weapon: 'Pistola 9mm', primary: 'PISTOL', melee: 'Bate Reforzado', heavy: 'Lanza Granadas', grenades: 2 }
+                { name: 'Alex', role: 'Líder', color: 0xef4444, weapon: 'Rifle de Asalto', primary: 'RIFLE', melee: 'Machete Tactico', heavy: 'Granadas (3)', grenades: 3, medkits: 1 },
+                { name: 'Elena', role: 'Médico', color: 0x10b981, weapon: 'Escopeta Calibre 12', primary: 'SHOTGUN', melee: 'Cuchillo Caza', heavy: 'Ninguna', grenades: 1, medkits: 3 },
+                { name: 'Marcus', role: 'Pesado', color: 0xf59e0b, weapon: 'Ametralladora', primary: 'SMG', melee: 'Hacha de Mano', heavy: 'Bazuka RP3', grenades: 4, medkits: 1 },
+                { name: 'Sarah', role: 'Tiradora', color: 0x3b82f6, weapon: 'Rifle Precisión', primary: 'SNIPER', melee: 'Machete', heavy: 'Granadas (2)', grenades: 2, medkits: 1 },
+                { name: 'Carlos', role: 'Ingeniero', color: 0x8b5cf6, weapon: 'Pistola 9mm', primary: 'PISTOL', melee: 'Bate Reforzado', heavy: 'Lanza Granadas', grenades: 2, medkits: 1 }
             ];
 
             survivors.length = 0;
@@ -198,9 +200,18 @@
                     primary: cfg.primary || 'PISTOL',
                     grenades: cfg.grenades || 0,
                     grenadeCooldown: 0,
+                    armor: 0, // blindaje: absorbe 50% hasta agotarse
+                    medkits: cfg.medkits || 1, // botiquines para curar aliados
+                    healTarget: null,
+                    healFXTimer: 0,
+                    flares: 0, // bengalas: piden avion de suministros
+                    flareCooldown: 0,
+                    onTower: null, // torre ocupada (plataforma de francotirador)
                     buildProgress: 0,
                     buildTarget: null,
+                    buildSlot: 0, // esquina del cuadrado de barricadas 0..3
                     craftCooldown: 0,
+                    towerSiteId: null, // obra en la que trabaja
                     melee: cfg.melee,
                     heavy: cfg.heavy,
                     carriedCrate: null,
