@@ -8,14 +8,31 @@
 // COMBATE: PROYECTILES CON TRAYECTORIA FLUIDA
         // ==========================================================
         function fireSurvivorWeapon(survivor, targetZombie) {
+            const w = WEAPONS[survivor.primary] || WEAPONS.PISTOL;
+            if (survivor.ammo <= 0) return;
             survivor.ammo--;
-            survivor.shootCooldown = 0.22;
+            survivor.shootCooldown = w.cooldown;
 
-            const dmg = 25 + Math.floor(Math.random() * 15);
-
-            playSound('gun');
+            playSound('gun', w.sound);
             createMuzzleFlash(survivor.position);
-            spawnProjectile(survivor.position.clone().add(new THREE.Vector3(0, 1.1, 0)), targetZombie, dmg, 62, 0xfde68a);
+            const origin = survivor.position.clone().add(new THREE.Vector3(0, 1.1, 0));
+
+            if (w.pellets) {
+                // Escopeta: N perdigones al objetivo + salpicadura a cercanos
+                for (let i = 0; i < w.pellets; i++) {
+                    const dmg = w.dmg[0] + Math.floor(Math.random() * (w.dmg[1] - w.dmg[0]));
+                    spawnProjectile(origin, targetZombie, dmg, 55, w.color);
+                }
+                zombies.forEach(z => {
+                    if (z !== targetZombie && z.health > 0 && !z.dying && z.position.distanceTo(targetZombie.position) < 3) {
+                        const dmg = Math.round((w.dmg[0] + Math.random() * (w.dmg[1] - w.dmg[0])) * 0.5);
+                        spawnProjectile(origin, z, dmg, 55, w.color);
+                    }
+                });
+            } else {
+                const dmg = w.dmg[0] + Math.floor(Math.random() * (w.dmg[1] - w.dmg[0]));
+                spawnProjectile(origin, targetZombie, dmg, 62, w.color);
+            }
         }
 
         function spawnProjectile(originPos, targetEntity, damage, speed, color) {
@@ -165,54 +182,68 @@
             updateUI();
         }
 
+        function canUseIntervention(type) {
+            const now = Date.now() / 1000;
+            return (interventionCooldowns[type] || 0) <= now;
+        }
+
+        function setInterventionCooldown(type) {
+            interventionCooldowns[type] = Date.now() / 1000 + INTERVENTION_COOLDOWN;
+            startCooldownTick();
+            updateCooldownButtons();
+        }
+
+        function cooldownRemaining(type) {
+            return Math.max(0, Math.ceil((interventionCooldowns[type] || 0) - Date.now() / 1000));
+        }
+
+        function startCooldownTick() {
+            if (cooldownTickInterval) return;
+            cooldownTickInterval = setInterval(() => {
+                updateCooldownButtons();
+                const anyLeft = ['airdrop', 'artillery', 'adrenaline', 'barricade'].some(t => cooldownRemaining(t) > 0);
+                if (!anyLeft) { clearInterval(cooldownTickInterval); cooldownTickInterval = null; }
+            }, 250);
+        }
+
         function triggerIntervention(type) {
             initAudioEngine();
+            if (!canUseIntervention(type)) {
+                showToast(`Espera ${cooldownRemaining(type)}s para reutilizar esta ayuda.`);
+                return;
+            }
+            setInterventionCooldown(type);
 
             if (type === 'airdrop') {
-                // Cae un suministro en cada refugio activo (cubre todo el territorio ocupado)
+                // Avion deja 1 caja de arma + 1 pesada por refugio con animacion
                 activeShelterKeys.forEach(key => {
-                    const zone = ZONES[key];
-                    spawnCrate('HEAVY', zone.pos.x + (Math.random() * 6 - 3), zone.pos.z + (Math.random() * 6 - 3));
-                    spawnCrate('WEAPON', zone.pos.x + (Math.random() * 6 - 3), zone.pos.z + (Math.random() * 6 - 3));
+                    planeSupplyDrop(key, ['RIFLE', 'GRENADE']);
                 });
-                addLogEvent("¡Suministros aéreos lanzados en todos los Refugios activos!");
-                showToast("Cajas de armas lanzadas desde el aire.");
+                addLogEvent("¡Suministros aéreos en camino a todos los Refugios!");
+                showToast("Avion de suministros en camino.");
             } else if (type === 'artillery') {
-                let killed = 0;
-                zombies.forEach(z => {
-                    if (z.health > 0 && !z.dying) {
-                        z.health -= 120;
-                        if (z.health <= 0) {
-                            z.health = 0;
-                            z.dying = true;
-                            z.deathTimer = 0;
-                            dyingZombies.push(z);
-                            killed++;
-                        }
-                    }
-                });
-                zombiesAliveCount = Math.max(0, zombiesAliveCount - killed);
-                playSound('explosion');
-                addLogEvent(`¡Ataque de Artillería destruyó ${killed} zombies!`);
-                showToast(`Bombardeo orbital ejecutado: -${killed} zombies.`);
-                if (zombiesAliveCount === 0 && isWaveActive) endWaveSuccess();
+                // Helicoptero dispara misil AoE y se retira (daño aplicado al impactar)
+                heliMissileStrike();
+                addLogEvent("¡Helicoptero de ataque llamado sobre la horda!");
+                showToast("Helicoptero de ataque en camino.");
             } else if (type === 'adrenaline') {
+                // Avion medico: banner + cura tras sobrevuelo corto
+                showAirBanner('Apoyo medico en camino', 'fa-solid fa-plane text-emerald-300 text-lg');
+                const key = activeShelterKeys[0];
+                if (key) planeSupplyDrop(key, ['MED', 'FOOD']);
                 survivors.forEach(s => {
                     if (s.health > 0) {
                         s.health = s.maxHealth;
-                        s.ammo += 60;
+                        s.ammo = Math.min(250, s.ammo + 60);
                     }
                 });
                 addLogEvent("¡Chute de Adrenalina! Supervivientes curados al 100%.");
                 showToast("Adrenalina aplicada a todos los supervivientes.");
             } else if (type === 'barricade') {
-                activeShelterKeys.forEach(key => {
-                    const zone = ZONES[key];
-                    zone.health = Math.min(100, zone.health + 30);
-                    createDebrisBarricades(zone.pos);
-                });
-                addLogEvent("Barricadas de contención reforzadas en todos los refugios.");
-                showToast("Estructuras de refugio reparadas +30%.");
+                // Helicoptero trae una barricada por refugio y la suelta
+                activeShelterKeys.forEach(key => heliBarricadeDrop(key));
+                addLogEvent("Helicoptero de carga con barricadas en camino.");
+                showToast("Helicoptero con barricada en camino.");
             }
             updateUI();
         }
