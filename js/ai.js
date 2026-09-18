@@ -499,12 +499,22 @@
             }
         }
 
+        // Slot personal de llegada: mismo objetivo, punto distinto por unidad
+        // para no apilarse todos en el centro (anillo segun id).
+        function personalSlot(center, entity, radius) {
+            const id = (entity.id !== undefined) ? entity.id : 0;
+            const ang = (id * 2.4) % (Math.PI * 2);
+            return new THREE.Vector3(center.x + Math.cos(ang) * radius, 0, center.z + Math.sin(ang) * radius);
+        }
         function moveTowards(entity, targetPos, speed) {
             const dir = new THREE.Vector3().subVectors(targetPos, entity.position);
             dir.y = 0;
             if (dir.length() > 0.15) {
                 const isSurvivor = !entity.typeKey; // zombies tienen typeKey
                 const step = speed * gameSpeed;
+                // Clave de objetivo para detectar estancamiento en ESTE destino.
+                const tKey = Math.round(targetPos.x * 2) + ',' + Math.round(targetPos.z * 2);
+                if (entity._stuckKey !== tKey) { entity._stuckKey = tKey; entity._stuckFrames = 0; }
                 if (typeof tryMoveWithCollisions === 'function') {
                     const ox = entity.position.x, oz = entity.position.z;
                     tryMoveWithCollisions(entity, targetPos, step, isSurvivor);
@@ -514,6 +524,30 @@
                         if (!isSurvivor && typeof damageBlockingEnv === 'function') damageBlockingEnv(entity);
                         if (isSurvivor && typeof damageBlockingAsSurvivor === 'function') damageBlockingAsSurvivor(entity);
                     }
+                    // Estancado o atrapado: contar frames casi sin avance y buscar nueva ruta.
+                    if (moved < step * 0.3) {
+                        entity._stuckFrames = (entity._stuckFrames || 0) + 1;
+                    } else {
+                        entity._stuckFrames = Math.max(0, (entity._stuckFrames || 0) - 2);
+                    }
+                    if ((entity._stuckFrames || 0) >= 40 && !entity._detour) {
+                        // Nueva ruta: desvio lateral de 5-8m + alternar carril.
+                        const toT = new THREE.Vector3().subVectors(targetPos, entity.position);
+                        toT.y = 0; toT.normalize();
+                        const side = (entity._laneSide >= 0) ? 1 : -1;
+                        const dx = -toT.z * side, dz = toT.x * side;
+                        const dist = 5 + Math.random() * 3;
+                        entity._detour = new THREE.Vector3(entity.position.x + dx * dist + toT.x * 2, 0, entity.position.z + dz * dist + toT.z * 2);
+                        entity._detourTimer = 90;
+                        entity._stuckFrames = 0;
+                        entity._laneSide = -side; // probar el otro lado la proxima vez
+                        if (isSurvivor) entity.thoughtText = 'Atascado, buscando nueva ruta...';
+                    }
+                    // Si lleva desvio activo mucho sin progresar al objetivo, renovarlo.
+                    if (entity._detour && entity._stuckFrames >= 60) {
+                        entity._detour = null;
+                        entity._stuckFrames = 0;
+                    }
                 } else {
                     dir.normalize();
                     entity.position.addScaledVector(dir, step);
@@ -522,6 +556,7 @@
                 entity.isMoving = true;
             } else {
                 entity.isMoving = false;
+                entity._stuckFrames = 0;
             }
         }
         // Superviviente bloqueado: demuele el muro/escombro que impide acceder
@@ -1148,7 +1183,7 @@
             const d = s.position.distanceTo(site.pos);
             if (d > 3.4) {
                 s.thoughtText = `Yendo a la obra de la torre...`;
-                moveTowards(s, site.pos, 0.11);
+                moveTowards(s, personalSlot(site.pos, s, 2.2), 0.11);
                 return true;
             }
             s.isMoving = false;
@@ -1356,7 +1391,7 @@
             const d = s.position.distanceTo(zone.pos);
             if (d > 4) {
                 s.thoughtText = `Yendo a fundar refugio en ${zone.name}...`;
-                moveTowards(s, zone.pos, 0.11);
+                moveTowards(s, personalSlot(zone.pos, s, 2.4), 0.11);
                 return true;
             }
             s.isMoving = false;
