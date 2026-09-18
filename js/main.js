@@ -90,6 +90,10 @@ function init3DWorld() {
             updateProjectiles(fixedDelta);
             if (typeof updateAirSupport === 'function') updateAirSupport(fixedDelta);
             if (typeof updateTowerBars === 'function') updateTowerBars();
+            // Game over: equipo completo caido
+            if (!gameOverActive && survivors.length > 0 && survivors.every(s => s.health <= 0)) {
+                if (typeof showGameOver === 'function') showGameOver();
+            }
         }
 
 function animate() {
