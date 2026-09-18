@@ -327,6 +327,26 @@
         </div>
     </aside>
 
+    <!-- Game Over Overlay -->
+    <div id="gameover-overlay" class="hidden fixed inset-0 z-50 items-center justify-center bg-black/70 backdrop-blur-sm">
+        <div class="glass-panel-danger rounded-3xl px-10 py-8 text-center shadow-2xl pulse-alert max-w-md">
+            <div class="w-14 h-14 mx-auto mb-3 rounded-2xl bg-gradient-to-tr from-red-600 to-amber-600 flex items-center justify-center text-2xl text-white">
+                <i class="fa-solid fa-skull-crossbones"></i>
+            </div>
+            <h2 class="text-xl font-black tracking-wide text-red-300 mb-1">TODOS LOS SUPERVIVIENTES HAN MUERTO</h2>
+            <p id="gameover-stats" class="text-xs text-slate-400 mb-5">Oleada 1</p>
+            <div class="flex flex-col gap-2">
+                <button onclick="retryFromZero()" class="px-5 py-2.5 rounded-xl bg-gradient-to-r from-red-600 to-amber-600 hover:from-red-500 hover:to-amber-500 text-white font-bold text-sm transition flex items-center justify-center gap-2">
+                    <i class="fa-solid fa-rotate-right"></i> Reintentar desde 0
+                </button>
+                <button onclick="retryFromCheckpoint()" class="px-5 py-2.5 rounded-xl bg-slate-800 hover:bg-emerald-700 border border-emerald-500/40 text-emerald-200 font-bold text-sm transition flex items-center justify-center gap-2">
+                    <i class="fa-solid fa-helicopter"></i> Reintentar desde el punto actual
+                </button>
+            </div>
+            <p class="text-[10px] text-slate-500 mt-3">El rescate deja 5 supervivientes nuevos donde quedaron.</p>
+        </div>
+    </div>
+
     <!-- Codigo propio del proyecto (orden de carga importante) -->
     <script src="js/config.js"></script>
     <script src="js/audio.js"></script>
