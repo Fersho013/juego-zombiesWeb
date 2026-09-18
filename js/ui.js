@@ -49,13 +49,16 @@
                 const garrison = countAliveGarrison(key);
                 const turretLabel = zone.turret ? (zone.turret.improvised ? 'Improvisada' : 'Pesada') : 'Sin torreta';
                 const healthColor = zone.health > 50 ? 'bg-emerald-500' : zone.health > 20 ? 'bg-amber-500' : 'bg-rose-600';
+                const mainStar = (typeof mainShelterKey !== 'undefined' && key === mainShelterKey) ? ' ★' : '';
+                const wallInfo = (typeof shelterWallCount === 'function' && walls.some(w => w.shelterKey === key))
+                    ? ` • <i class="fa-solid fa-house-chimney"></i>${shelterWallCount(key)}/4` : '';
 
                 const card = document.createElement('div');
                 card.className = 'space-y-1 text-xs bg-slate-900/60 p-2.5 rounded-2xl border border-slate-800';
                 card.innerHTML = `
                     <div class="flex justify-between items-center text-[10px]">
-                        <span class="text-cyan-300 font-bold truncate">${zone.name}</span>
-                        <span class="text-slate-400">${garrison} <i class="fa-solid fa-user-shield"></i></span>
+                        <span class="text-cyan-300 font-bold truncate">${zone.name}${mainStar}</span>
+                        <span class="text-slate-400">${garrison} <i class="fa-solid fa-user-shield"></i>${wallInfo}</span>
                     </div>
                     <div class="w-full h-1.5 rounded-full bg-slate-800 overflow-hidden">
                         <div class="h-full ${healthColor} transition-all duration-300" style="width: ${Math.max(0, zone.health)}%"></div>
@@ -87,28 +90,61 @@
             });
         }
 
+        function structureBar(wrap, id, title, icon, pct, sub) {
+            let bar = document.getElementById(id);
+            if (!bar) {
+                bar = document.createElement('div');
+                bar.id = id;
+                bar.className = 'glass-panel px-3 py-1.5 rounded-xl text-[10px] font-bold text-slate-200';
+                bar.innerHTML = `<div class="flex justify-between mb-0.5"><span>${icon} ${title}</span><span id="${id}-pct">0%</span></div><div class="w-full h-1.5 rounded-full bg-slate-800 overflow-hidden"><div id="${id}-fill" class="h-full bg-amber-400 transition-all duration-200" style="width:0%"></div></div>`;
+                wrap.appendChild(bar);
+            }
+            const fill = document.getElementById(`${id}-fill`);
+            const txt = document.getElementById(`${id}-pct`);
+            if (fill) fill.style.width = `${pct}%`;
+            if (txt) txt.innerText = sub;
+            return bar;
+        }
+
         function updateTowerBars() {
             const wrap = document.getElementById('tower-bars');
             if (!wrap || typeof towers === 'undefined') return;
-            const sites = towers.filter(t => !t.complete);
-            sites.forEach(t => {
-                let bar = document.getElementById(`tower-bar-${t.id}`);
-                if (!bar) {
-                    bar = document.createElement('div');
-                    bar.id = `tower-bar-${t.id}`;
-                    bar.className = 'glass-panel px-3 py-1.5 rounded-xl text-[10px] font-bold text-slate-200';
-                    bar.innerHTML = `<div class="flex justify-between mb-0.5"><span><i class="fa-solid fa-tower-observation text-amber-300 mr-1"></i>Torre ${t.id} en construccion</span><span id="tower-pct-${t.id}">0%</span></div><div class="w-full h-1.5 rounded-full bg-slate-800 overflow-hidden"><div id="tower-fill-${t.id}" class="h-full bg-amber-400 transition-all duration-200" style="width:0%"></div></div>`;
-                    wrap.appendChild(bar);
-                }
+            const aliveIds = [];
+            // Obras de torre en curso
+            towers.filter(t => !t.complete).forEach(t => {
                 const pct = Math.min(100, Math.round(t.progress / TOWER_WORK_REQUIRED * 100));
-                const fill = document.getElementById(`tower-fill-${t.id}`);
-                const txt = document.getElementById(`tower-pct-${t.id}`);
-                if (fill) fill.style.width = `${pct}%`;
-                if (txt) txt.innerText = `${pct}% (${Math.floor(t.progress)}/${TOWER_WORK_REQUIRED}s)`;
+                structureBar(wrap, `tower-bar-${t.id}`, `Torre ${t.id} en construccion`,
+                    '<i class="fa-solid fa-tower-observation text-amber-300 mr-1"></i>', pct, `${pct}% (${Math.floor(t.progress)}/${TOWER_WORK_REQUIRED}s)`);
+                aliveIds.push(`tower-bar-${t.id}`);
             });
+            // Fundacion de nuevo refugio
+            if (typeof shelterFounder !== 'undefined' && shelterFounder) {
+                const pct = Math.min(100, Math.round(shelterFounder.progress / shelterFounder.required * 100));
+                structureBar(wrap, 'shelter-found-bar', `Refugio en ${ZONES[shelterFounder.zoneKey].name}`,
+                    '<i class="fa-solid fa-house-chimney text-amber-300 mr-1"></i>', pct, `${pct}% (${Math.floor(shelterFounder.progress)}/${shelterFounder.required}s)`);
+                aliveIds.push('shelter-found-bar');
+            }
+            // Reconstruccion post-oleada
+            if (typeof mostDamagedShelter === 'function' && typeof shelterRepairPct === 'function') {
+                const dmg = mostDamagedShelter();
+                if (dmg) {
+                    const pct = shelterRepairPct(dmg.key);
+                    structureBar(wrap, 'shelter-repair-bar', `Reconstruyendo ${dmg.zone.name}`,
+                        '<i class="fa-solid fa-hammer text-emerald-300 mr-1"></i>', pct, `${pct}%`);
+                    aliveIds.push('shelter-repair-bar');
+                }
+            }
+            // Muros dañados de casas-refugio
+            if (typeof walls !== 'undefined') {
+                walls.filter(w => w.health < w.maxHealth).slice(0, 6).forEach((w, i) => {
+                    const pct = Math.max(0, Math.round(w.health / w.maxHealth * 100));
+                    structureBar(wrap, `wall-bar-${w.shelterKey}-${i}`, `Muro ${ZONES[w.shelterKey].name}`,
+                        '<i class="fa-solid fa-house-chimney text-sky-300 mr-1"></i>', pct, `${pct}%`);
+                    aliveIds.push(`wall-bar-${w.shelterKey}-${i}`);
+                });
+            }
             Array.from(wrap.children).forEach(ch => {
-                const id = parseInt(ch.id.replace('tower-bar-', ''), 10);
-                if (!sites.some(t => t.id === id)) wrap.removeChild(ch);
+                if (!aliveIds.includes(ch.id)) wrap.removeChild(ch);
             });
         }
 
@@ -237,4 +273,35 @@
             document.getElementById('toast-text').innerText = text;
             toast.classList.remove('hidden');
             setTimeout(() => toast.classList.add('hidden'), 3500);
+        }
+
+        // ==========================================================
+        // GAME OVER: cartel con 2 opciones de reintento
+        // ==========================================================
+        function showGameOver() {
+            gameOverActive = true;
+            prevGameSpeed = gameSpeed;
+            gameSpeed = 0;
+            setSpeed(0);
+            const stats = document.getElementById('gameover-stats');
+            if (stats) stats.innerText = `Oleada ${currentWave} • ${zombiesAliveCount} zombies en pie • Torres: ${towers.filter(t => t.complete).length} • Refugios: ${activeShelterKeys.length}`;
+            const ov = document.getElementById('gameover-overlay');
+            if (ov) { ov.classList.remove('hidden'); ov.classList.add('flex'); }
+            addLogEvent('¡TODOS LOS SUPERVIVIENTES HAN MUERTO!');
+        }
+
+        function retryFromZero() {
+            location.reload(); // reinicio total desde 0
+        }
+
+        function retryFromCheckpoint() {
+            const ov = document.getElementById('gameover-overlay');
+            if (ov) { ov.classList.add('hidden'); ov.classList.remove('flex'); }
+            showToast('Helicoptero de rescate en camino...');
+            deliverRescueTeam(() => {
+                gameOverActive = false;
+                gameSpeed = 1;
+                setSpeed(1);
+                updateUI();
+            });
         }
