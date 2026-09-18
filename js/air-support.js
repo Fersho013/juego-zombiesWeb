@@ -314,7 +314,30 @@ function createSurvivorBarricade(x, z, fromAir) {
     bar.rotation.y = Math.random() * Math.PI;
     bar.castShadow = true;
     scene.add(bar);
-    const rec = { mesh: bar, health: 120, maxHealth: 120, position: bar.position, owner: null, builtBy: fromAir ? 'Apoyo aereo' : 'Supervivientes' };
+    const rec = { mesh: bar, health: 120, maxHealth: 120, position: bar.position, owner: null, builtBy: fromAir ? 'Apoyo aereo' : 'Supervivientes', spiked: false };
+    barricades.push(rec);
+    if (typeof registerCollider === 'function') registerCollider(rec.position, 1.6, rec, 'barricade', false);
+    return rec;
+}
+// Barricada con pinchos (individual): mas HP y devuelve daño al atacante.
+function createSpikeBarricade(x, z, owner) {
+    const grp = new THREE.Group();
+    grp.position.set(x, 0, z);
+    const base = new THREE.Mesh(new THREE.BoxGeometry(3, 1.1, 0.8),
+        new THREE.MeshStandardMaterial({ color: 0x44403c, roughness: 0.9 }));
+    base.position.y = 0.55;
+    base.castShadow = true;
+    grp.add(base);
+    const spikeMat = new THREE.MeshStandardMaterial({ color: 0xa8a29e, metalness: 0.7, roughness: 0.35 });
+    for (let i = -1; i <= 1; i++) {
+        const spike = new THREE.Mesh(new THREE.ConeGeometry(0.16, 1.1, 6), spikeMat);
+        spike.position.set(i * 0.9, 1.5, 0);
+        spike.castShadow = true;
+        grp.add(spike);
+    }
+    grp.rotation.y = Math.random() * Math.PI;
+    scene.add(grp);
+    const rec = { mesh: grp, health: 160, maxHealth: 160, position: grp.position, owner: owner || null, builtBy: 'Supervivientes', spiked: true };
     barricades.push(rec);
     if (typeof registerCollider === 'function') registerCollider(rec.position, 1.6, rec, 'barricade', false);
     return rec;
