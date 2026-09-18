@@ -88,7 +88,10 @@
         // TORRES / LOOT / CURACION (cambios serie 3)
         // ==========================================================
         const FIXED_STEP = 1 / 60; // simulacion a 60 fps fijos
-        const TOWER_MAX = Infinity; // torres ilimitadas: construyen todas las que puedan
+        const TOWER_MAX = Infinity; // legacy global (ahora manda el limite por refugio)
+        const TOWERS_PER_SHELTER = 3; // 3 torres alrededor por refugio
+        const TOWERS_PER_CUSTOM = 6; // refugio creado desde 0: 3 techo + 3 perimetro
+        const MAX_SURVIVORS_HARD = 50;
         const TOWER_WORK_REQUIRED = 400; // segundos-trabajador por torre
         const TOWER_HEIGHT = 8.4; // altura de la plataforma
         const TOWER_HP = 400;
@@ -129,6 +132,90 @@
         const survivorRequests = { supply: false, airstrike: false, reinforce: false };
         const survivorRequestCooldowns = { supply: 0, airstrike: 0, reinforce: 0 };
         const SURVIVOR_REQUEST_COOLDOWN = 60; // segundos entre alertas del mismo tipo
+
+        // ==========================================================
+        // COLISIONES / PUERTAS / FORTALEZA (serie 6)
+        // ==========================================================
+        const colliders = []; // {pos:Vector3, radius, ref, kind:'wall'|'barricade'|'tower'|'env'|'door', destructible:bool, hp}
+        const doors = []; // {mesh, position, shelterKey, health, maxHealth}
+        const customShelters = {}; // zoneKey -> true si fue creado desde 0
+        const shelterLevels = {}; // zoneKey -> 1 mini-casa | 2 casa | 3 fortaleza
+        function towerLimitForShelter(zoneKey) {
+            return customShelters[zoneKey] ? TOWERS_PER_CUSTOM : TOWERS_PER_SHELTER;
+        }
+        function countTowersForShelter(zoneKey) {
+            return towers.filter(t => t.zoneKey === zoneKey).length;
+        }
+        function countRoofTowers(zoneKey) {
+            return towers.filter(t => t.zoneKey === zoneKey && t.roof).length;
+        }
+        function getMaxSurvivors() {
+            const n = activeShelterKeys.length;
+            if (n < 3) return 5;
+            return Math.min(MAX_SURVIVORS_HARD, 5 + (n - 2) * 2); // 3->7, 4->9, 5->11...
+        }
+        function registerCollider(pos, radius, ref, kind, destructible) {
+            const c = { pos: pos, radius: radius, ref: ref, kind: kind, destructible: !!destructible };
+            colliders.push(c);
+            return c;
+        }
+        function unregisterColliderForRef(ref) {
+            for (let i = colliders.length - 1; i >= 0; i--) {
+                if (colliders[i].ref === ref) colliders.splice(i, 1);
+            }
+        }
+        // Colision circular simple: empuja fuera de colliders solidos.
+        // Las puertas de supervivientes NO bloquean a supervivientes (solo zombies).
+        function isColliderSolidFor(c, isSurvivor) {
+            if (c.kind === 'door') return !isSurvivor; // supervivientes pasan, zombies no
+            return true;
+        }
+        function resolveEntityCollisions(entity, isSurvivor) {
+            if (!entity || !entity.position) return;
+            for (const c of colliders) {
+                if (!isColliderSolidFor(c, isSurvivor)) continue;
+                if (c.ref && c.ref.health !== undefined && c.ref.health <= 0) continue;
+                if (c.ref && c.ref.hp !== undefined && c.ref.hp <= 0) continue;
+                const dx = entity.position.x - c.pos.x;
+                const dz = entity.position.z - c.pos.z;
+                const d = Math.hypot(dx, dz);
+                const minD = c.radius + 0.5;
+                if (d < minD && d > 0.001) {
+                    const push = (minD - d);
+                    entity.position.x += (dx / d) * push;
+                    entity.position.z += (dz / d) * push;
+                } else if (d <= 0.001) {
+                    entity.position.x += minD;
+                }
+            }
+        }
+        // Movimiento con rodeo: si choca de frente, desliza lateral ( elected ).
+        // Devuelve true si avanzo.
+        function tryMoveWithCollisions(entity, targetPos, step, isSurvivor) {
+            const ox = entity.position.x, oz = entity.position.z;
+            const dir = new THREE.Vector3().subVectors(targetPos, entity.position);
+            dir.y = 0;
+            if (dir.length() < 0.15) return false;
+            dir.normalize();
+            entity.position.x += dir.x * step;
+            entity.position.z += dir.z * step;
+            resolveEntityCollisions(entity, isSurvivor);
+            // Si casi no avanzo (bloqueado), intenta rodear en perpendicular.
+            const moved = Math.hypot(entity.position.x - ox, entity.position.z - oz);
+            if (moved < step * 0.3) {
+                const side = new THREE.Vector3(-dir.z, 0, dir.x);
+                entity.position.x = ox + side.x * step;
+                entity.position.z = oz + side.z * step;
+                resolveEntityCollisions(entity, isSurvivor);
+                const moved2 = Math.hypot(entity.position.x - ox, entity.position.z - oz);
+                if (moved2 < step * 0.3) {
+                    entity.position.x = ox - side.x * step;
+                    entity.position.z = oz - side.z * step;
+                    resolveEntityCollisions(entity, isSurvivor);
+                }
+            }
+            return true;
+        }
 
         // Audio Synthesizer Engine
         let synthGun, synthExplosion, synthPickup, synthZombie, synthTurret;
