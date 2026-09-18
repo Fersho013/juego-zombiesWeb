@@ -98,10 +98,11 @@
             parkGrass.receiveShadow = true;
             parkGroup.add(parkGrass);
 
-            const fountainBase = new THREE.Mesh(new THREE.CylinderGeometry(4, 4, 0.8, 16), new THREE.MeshStandardMaterial({ color: 0x475569 }));
-            fountainBase.position.y = 0.4;
-            fountainBase.castShadow = true;
-            parkGroup.add(fountainBase);
+            // Gran arbol central (reemplaza la base gris): tocarlo inicia la
+            // reconstruccion del refugio del parque.
+            const bigTree = createBigTreeModel();
+            bigTree.position.set(0, 0, 0);
+            parkGroup.add(bigTree);
 
             [[-12, -12], [14, -10], [-10, 12], [12, 14], [0, -14]].forEach(pos => {
                 const tree = createTreeModel();
@@ -117,17 +118,18 @@
             // ventanas abiertas e interior amplio para torretas/suministros.
             // ==========================================
             buildGrandRuinHouse();
-            // Colisiones del entorno: nadie atraviesa pilares, autos, arboles, fuente.
+            // Colisiones del entorno (hitbox ajustada: toca y actua, sin encerrar).
             if (typeof registerCollider === 'function') {
                 [[-15, -13], [15, -13], [-15, 13], [15, 13]].forEach(p => {
-                    registerCollider(new THREE.Vector3(p[0], 0, p[1]), 1.2, { id: `mall-pillar-${p[0]}-${p[1]}` }, 'env', false);
+                    registerCollider(new THREE.Vector3(p[0], 0, p[1]), 1.0, { id: `mall-pillar-${p[0]}-${p[1]}` }, 'env', false);
                 });
                 [[-10, -10], [8, -12], [-8, 10], [10, 8], [-15, 2], [15, -2]].forEach(p => {
-                    registerCollider(new THREE.Vector3(60 + p[0], 0, p[1]), 2.2, { id: `car-${p[0]}-${p[1]}`, hp: 60 }, 'env', false);
+                    registerCollider(new THREE.Vector3(60 + p[0], 0, p[1]), 1.8, { id: `car-${p[0]}-${p[1]}`, hp: 60 }, 'env', false);
                 });
-                registerCollider(new THREE.Vector3(-60, 0, 0), 4.2, { id: 'fountain' }, 'env', false);
+                // Gran arbol central del parque: hitbox pequeña para poder tocarlo.
+                registerCollider(new THREE.Vector3(-60, 0, 0), 1.4, { id: 'park-bigtree' }, 'env', false);
                 [[-12, -12], [14, -10], [-10, 12], [12, 14], [0, -14]].forEach(p => {
-                    registerCollider(new THREE.Vector3(-60 + p[0], 0, p[1]), 1.0, { id: `tree-${p[0]}-${p[1]}` }, 'env', false);
+                    registerCollider(new THREE.Vector3(-60 + p[0], 0, p[1]), 0.8, { id: `tree-${p[0]}-${p[1]}` }, 'env', false);
                 });
             }
         }
@@ -223,6 +225,30 @@
             foliage.castShadow = true;
             group.add(foliage);
 
+            return group;
+        }
+
+        // Gran arbol del parque: tronco grueso + copa triple. Marca el corazon
+        // del refugio PARK; al tocarlo comienza la reconstruccion.
+        function createBigTreeModel() {
+            const group = new THREE.Group();
+            const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.9, 1.2, 6), new THREE.MeshStandardMaterial({ color: 0x78350f, roughness: 0.85 }));
+            trunk.position.y = 3;
+            trunk.castShadow = true;
+            group.add(trunk);
+            const leafMat = new THREE.MeshStandardMaterial({ color: 0x047857, roughness: 0.8 });
+            [[0, 7.2, 0, 4.2], [-2.6, 5.8, 1.2, 2.8], [2.6, 5.8, -1.2, 2.8]].forEach(([x, y, z, r]) => {
+                const c = new THREE.Mesh(new THREE.DodecahedronGeometry(r), leafMat);
+                c.position.set(x, y, z);
+                c.castShadow = true;
+                group.add(c);
+            });
+            // Anillo de piedras al pie (marca visual de proximidad, no bloquea).
+            const ring = new THREE.Mesh(new THREE.RingGeometry(1.8, 2.4, 20),
+                new THREE.MeshBasicMaterial({ color: 0x34d399, side: THREE.DoubleSide, transparent: true, opacity: 0.5 }));
+            ring.rotation.x = -Math.PI / 2;
+            ring.position.y = 0.05;
+            group.add(ring);
             return group;
         }
 
