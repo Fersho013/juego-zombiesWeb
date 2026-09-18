@@ -37,6 +37,9 @@
         </div>
     </div>
 
+    <!-- Tower construction progress bars -->
+    <div class="absolute top-32 left-1/2 -translate-x-1/2 z-30 pointer-events-none w-72 space-y-1" id="tower-bars"></div>
+
     <!-- UI Header -->
     <header class="absolute top-3 left-3 right-3 z-20 flex flex-wrap justify-between items-center gap-3 pointer-events-none">
         <!-- Title & Wave Overview -->
@@ -298,6 +301,12 @@
                             <div class="text-[9px] text-slate-400">Caja Cuidada en Espalda</div>
                             <div id="survivor-crate-val" class="font-bold text-amber-300 text-[11px]">Ninguna (Manos Libres)</div>
                         </div>
+                    </div>
+
+                    <div class="col-span-2 p-2 rounded-xl bg-slate-900/80 border border-slate-800 flex items-center justify-between text-[11px]">
+                        <span class="text-slate-400"><i class="fa-solid fa-shield-halved text-sky-300 mr-1"></i>Armadura: <span id="survivor-armor-val" class="font-bold text-sky-300">0</span></span>
+                        <span class="text-slate-400"><i class="fa-solid fa-kit-medical text-emerald-300 mr-1"></i>Botiquines: <span id="survivor-medkits-val" class="font-bold text-emerald-300">0</span></span>
+                        <span class="text-slate-400"><i class="fa-solid fa-fire text-pink-300 mr-1"></i>Bengalas: <span id="survivor-flares-val" class="font-bold text-pink-300">0</span></span>
                     </div>
                 </div>
             </div>
