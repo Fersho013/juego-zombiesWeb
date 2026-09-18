@@ -66,3 +66,7 @@ body {
             padding: 0 6px;
             margin-left: 4px;
         }
+        /* Barras de construccion de torres */
+        #tower-bars > div {
+            animation: pulseAlert 2s infinite ease-in-out;
+        }
