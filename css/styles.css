@@ -1,0 +1,57 @@
+/* ==========================================================
+   Survivors VS Zombies 3D - Estilos principales
+   Extraido desde index.html original. Agrega aqui nuevos
+   estilos puntuales sin tocar el resto del proyecto.
+   ========================================================== */
+
+body {
+            font-family: 'Outfit', sans-serif;
+            user-select: none;
+            overflow: hidden;
+            background-color: #050811;
+        }
+        ::-webkit-scrollbar {
+            width: 4px;
+        }
+        ::-webkit-scrollbar-track {
+            background: rgba(15, 23, 42, 0.6);
+        }
+        ::-webkit-scrollbar-thumb {
+            background: rgba(239, 68, 68, 0.5);
+            border-radius: 4px;
+        }
+        .glass-panel {
+            background: rgba(10, 15, 29, 0.82);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        .glass-panel-danger {
+            background: rgba(24, 9, 15, 0.85);
+            backdrop-filter: blur(16px);
+            border: 1px solid rgba(239, 68, 68, 0.3);
+        }
+        .thought-bubble {
+            position: absolute;
+            transform: translate(-50%, -100%);
+            pointer-events: none;
+            transition: transform 0.1s ease-out, opacity 0.2s ease;
+        }
+        @keyframes pulseAlert {
+            0%, 100% { opacity: 0.8; transform: scale(1); }
+            50% { opacity: 1; transform: scale(1.06); }
+        }
+        .pulse-alert {
+            animation: pulseAlert 1.5s infinite ease-in-out;
+        }
+        @keyframes scanline {
+            0% { transform: translateY(-100%); }
+            100% { transform: translateY(1000%); }
+        }
+        .scanline-effect {
+            position: absolute;
+            top: 0; left: 0; right: 0; height: 2px;
+            background: rgba(239, 68, 68, 0.25);
+            animation: scanline 8s linear infinite;
+            pointer-events: none;
+        }
