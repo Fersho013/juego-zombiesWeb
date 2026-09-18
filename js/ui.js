@@ -87,6 +87,31 @@
             });
         }
 
+        function updateTowerBars() {
+            const wrap = document.getElementById('tower-bars');
+            if (!wrap || typeof towers === 'undefined') return;
+            const sites = towers.filter(t => !t.complete);
+            sites.forEach(t => {
+                let bar = document.getElementById(`tower-bar-${t.id}`);
+                if (!bar) {
+                    bar = document.createElement('div');
+                    bar.id = `tower-bar-${t.id}`;
+                    bar.className = 'glass-panel px-3 py-1.5 rounded-xl text-[10px] font-bold text-slate-200';
+                    bar.innerHTML = `<div class="flex justify-between mb-0.5"><span><i class="fa-solid fa-tower-observation text-amber-300 mr-1"></i>Torre ${t.id} en construccion</span><span id="tower-pct-${t.id}">0%</span></div><div class="w-full h-1.5 rounded-full bg-slate-800 overflow-hidden"><div id="tower-fill-${t.id}" class="h-full bg-amber-400 transition-all duration-200" style="width:0%"></div></div>`;
+                    wrap.appendChild(bar);
+                }
+                const pct = Math.min(100, Math.round(t.progress / TOWER_WORK_REQUIRED * 100));
+                const fill = document.getElementById(`tower-fill-${t.id}`);
+                const txt = document.getElementById(`tower-pct-${t.id}`);
+                if (fill) fill.style.width = `${pct}%`;
+                if (txt) txt.innerText = `${pct}% (${Math.floor(t.progress)}/${TOWER_WORK_REQUIRED}s)`;
+            });
+            Array.from(wrap.children).forEach(ch => {
+                const id = parseInt(ch.id.replace('tower-bar-', ''), 10);
+                if (!sites.some(t => t.id === id)) wrap.removeChild(ch);
+            });
+        }
+
         function updateUI() {
             document.getElementById('wave-number-display').innerText = currentWave;
             document.getElementById('zombie-count-display').innerText = `${zombiesAliveCount} / ${zombiesToSpawn}`;
@@ -124,6 +149,12 @@
 
                 document.getElementById('survivor-melee-val').innerText = s.melee;
                 document.getElementById('survivor-heavy-val').innerText = `Granadas (${s.grenades || 0})`;
+                const armorEl = document.getElementById('survivor-armor-val');
+                if (armorEl) armorEl.innerText = `${Math.round(s.armor || 0)}`;
+                const medEl = document.getElementById('survivor-medkits-val');
+                if (medEl) medEl.innerText = `${s.medkits || 0}`;
+                const flareEl = document.getElementById('survivor-flares-val');
+                if (flareEl) flareEl.innerText = `${s.flares || 0}`;
                 document.getElementById('survivor-crate-val').innerText = s.carriedCrate ? s.carriedCrate.config.name : (s.buildTarget ? 'Material de barricada' : 'Ninguna (Manos Libres)');
                 document.getElementById('survivor-kills-val').innerText = s.kills;
 
