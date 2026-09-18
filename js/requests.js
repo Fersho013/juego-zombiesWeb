@@ -65,13 +65,33 @@ function updateSurvivorRequests(s, nearestZombie, minDist) {
     }
 }
 
+// Desde 3 refugios: el equipo puede llamar 2 reclutas extra (hasta el tope).
+function recruitExtraSurvivors() {
+    const maxA = (typeof getMaxSurvivors === 'function') ? getMaxSurvivors() : 5;
+    const alive = survivors.filter(o => o.health > 0).length;
+    if (activeShelterKeys.length < 3) {
+        showToast('Se requieren 3 refugios para llamar reclutas.');
+        return;
+    }
+    if (alive >= maxA) {
+        showToast(`Cupo lleno (${alive}/${maxA}).`);
+        return;
+    }
+    const n = Math.min(2, maxA - alive);
+    addLogEvent(`El equipo llama a ${n} recluta(s) extra (${alive}->${alive + n}/${maxA}).`);
+    deliverReinforcements(n);
+}
+
 // Habilita/deshabilita el boton "Mandar refuerzos" segun solicitud y bajas.
 function updateReinforceButton() {
     const btn = document.getElementById('btn-reinforce');
     const label = document.getElementById('reinforce-status');
+    const btn2 = document.getElementById('btn-recruit');
     if (!btn) return;
     const deadCount = typeof survivors !== 'undefined' ? survivors.filter(o => o.health <= 0).length : 0;
-    const canReinforce = deadCount > 0 && (survivorRequests.reinforce || deadCount > 0);
+    const alive = typeof survivors !== 'undefined' ? survivors.filter(o => o.health > 0).length : 0;
+    const maxA = (typeof getMaxSurvivors === 'function') ? getMaxSurvivors() : 5;
+    const canReinforce = deadCount > 0;
     if (canReinforce) {
         btn.classList.remove('opacity-50', 'pointer-events-none');
         btn.removeAttribute('disabled');
@@ -79,7 +99,19 @@ function updateReinforceButton() {
     } else {
         btn.classList.add('opacity-50', 'pointer-events-none');
         btn.setAttribute('disabled', 'true');
-        if (label) label.innerText = 'sin bajas';
+        if (label) label.innerText = `${alive}/${maxA}`;
+    }
+    if (btn2) {
+        const canRecruit = activeShelterKeys.length >= 3 && alive < maxA;
+        if (canRecruit) {
+            btn2.classList.remove('opacity-50', 'pointer-events-none');
+            btn2.removeAttribute('disabled');
+        } else {
+            btn2.classList.add('opacity-50', 'pointer-events-none');
+            btn2.setAttribute('disabled', 'true');
+        }
+        const l2 = document.getElementById('recruit-status');
+        if (l2) l2.innerText = `${alive}/${maxA}`;
     }
 }
 
@@ -89,6 +121,8 @@ let reinforceQueued = false;
 function triggerReinforcement() {
     const deadCount = survivors.filter(o => o.health <= 0).length;
     if (deadCount <= 0) {
+        // Sin bajas pero con 3+ refugios: ofrecer reclutas.
+        if (activeShelterKeys.length >= 3) { recruitExtraSurvivors(); return; }
         showToast('No hay bajas que reforzar.');
         return;
     }
@@ -104,10 +138,23 @@ function triggerReinforcement() {
     updateReinforceButton();
 }
 
-// Helicoptero deja exactamente N supervivientes (los faltantes).
+// Helicoptero deja N supervivientes: repone bajas y, desde 3 refugios,
+// suma reclutas hasta el tope dinámico (7/9/11...50). Si cae a <3, tope 5.
 function deliverReinforcements(count) {
+    const maxAlive = (typeof getMaxSurvivors === 'function') ? getMaxSurvivors() : 5;
+    const alive = survivors.filter(o => o.health > 0).length;
     const dead = survivors.filter(o => o.health <= 0);
-    const n = Math.min(count || dead.length, dead.length);
+    // Primero reponer bajas, luego reclutas extra si hay cupo.
+    const wanted = Math.max(count || 0, 0);
+    const toReplace = Math.min(dead.length, wanted || dead.length);
+    const freeSlots = Math.max(0, maxAlive - alive);
+    const extra = Math.min(Math.max(0, (count || 0) - toReplace), freeSlots);
+    // Si se pide sin bajas pero hay cupo (llamado desde 3 refugios), trae hasta 2.
+    let recruitExtra = 0;
+    if (dead.length === 0 && alive < maxAlive && (count || 0) > 0) {
+        recruitExtra = Math.min(count, freeSlots, 2);
+    }
+    const n = toReplace + extra + recruitExtra;
     if (n <= 0) return;
     // Retira los cuerpos caidos antes del aterrizaje.
     dead.slice(0, n).forEach(d => {
@@ -172,7 +219,8 @@ function deliverReinforcements(count) {
                 survivorRequests.reinforce = false;
                 reinforceQueued = false;
                 groupFlee = null;
-                addLogEvent(`Refuerzos en tierra: ${newcomers.length} superviviente(s) se unen (${survivors.filter(o => o.health > 0).length}/5 en pie).`);
+                const maxA = (typeof getMaxSurvivors === 'function') ? getMaxSurvivors() : 5;
+                addLogEvent(`Refuerzos en tierra: ${newcomers.length} superviviente(s) se unen (${survivors.filter(o => o.health > 0).length}/${maxA} en pie).`);
                 showToast(`Refuerzos desplegados: +${newcomers.length}.`);
                 if (typeof renderSurvivorTabs === 'function') renderSurvivorTabs();
                 updateReinforceButton();
