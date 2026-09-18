@@ -1115,7 +1115,8 @@
             if (s.position.distanceTo(tower.pos) > 3) {
                 s.thoughtText = `Subiendo a torre ${tower.id}...`;
                 const base = tower.pos.clone();
-                if (s.position.distanceTo(base) > 1.5) moveTowards(s, base, 0.13);
+                // Umbral tactil 2.2 (la hitbox de la torre ya no empuja al subir).
+                if (s.position.distanceTo(base) > 2.2) moveTowards(s, base, 0.13);
                 else {
                     tower.occupants.push(s);
                     s.onTower = tower;
