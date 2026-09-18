@@ -82,7 +82,11 @@
             MELEE: { name: 'Caja Armas Melee', color: 0xd97706, icon: 'fa-shield-cat', type: 'melee' },
             HEAVY: { name: 'Caja Armas Pesadas', color: 0xef4444, icon: 'fa-bomb', type: 'heavy' },
             MED: { name: 'Caja de Curaciones', color: 0x10b981, icon: 'fa-kit-medical', type: 'med' },
-            FOOD: { name: 'Caja de Comida', color: 0x3b82f6, icon: 'fa-utensils', type: 'food' }
+            FOOD: { name: 'Caja de Comida', color: 0x3b82f6, icon: 'fa-utensils', type: 'food' },
+            RIFLE: { name: 'Caja Rifle de Asalto', color: 0xfbbf24, icon: 'fa-gun', type: 'rifle' },
+            SHOTGUN: { name: 'Caja Escopeta', color: 0xfb923c, icon: 'fa-burst', type: 'shotgun' },
+            SNIPER: { name: 'Caja Francotirador', color: 0x38bdf8, icon: 'fa-crosshairs', type: 'sniper' },
+            GRENADE: { name: 'Caja de Granadas', color: 0x22c55e, icon: 'fa-bomb', type: 'grenade' }
         };
 
         function spawnCrate(typeKey, x, z) {
@@ -140,7 +144,12 @@
 
                 { type: 'WEAPON', x: -22, z: -60 },
                 { type: 'HEAVY', x: 22, z: -60 },
-                { type: 'FOOD', x: 0, z: -58 }
+                { type: 'FOOD', x: 0, z: -58 },
+                { type: 'RIFLE', x: 12, z: -12 },
+                { type: 'SHOTGUN', x: -12, z: 12 },
+                { type: 'GRENADE', x: 58, z: 6 },
+                { type: 'SNIPER', x: -58, z: -14 },
+                { type: 'RIFLE', x: 0, z: -52 }
             ];
 
             locations.forEach(loc => spawnCrate(loc.type, loc.x, loc.z));
@@ -152,11 +161,11 @@
         // ==========================================================
         function initSurvivors() {
             const survivorConfigs = [
-                { name: 'Alex', role: 'Líder', color: 0xef4444, weapon: 'Rifle de Asalto', melee: 'Machete Tactico', heavy: 'Granadas (3)' },
-                { name: 'Elena', role: 'Médico', color: 0x10b981, weapon: 'Escopeta Calibre 12', melee: 'Cuchillo Caza', heavy: 'Ninguna' },
-                { name: 'Marcus', role: 'Pesado', color: 0xf59e0b, weapon: 'Ametralladora', melee: 'Hacha de Mano', heavy: 'Bazuka RP3' },
-                { name: 'Sarah', role: 'Tiradora', color: 0x3b82f6, weapon: 'Rifle Precisión', melee: 'Machete', heavy: 'Granadas (2)' },
-                { name: 'Carlos', role: 'Ingeniero', color: 0x8b5cf6, weapon: 'Pistola 9mm', melee: 'Bate Reforzado', heavy: 'Lanza Granadas' }
+                { name: 'Alex', role: 'Líder', color: 0xef4444, weapon: 'Rifle de Asalto', primary: 'RIFLE', melee: 'Machete Tactico', heavy: 'Granadas (3)', grenades: 3 },
+                { name: 'Elena', role: 'Médico', color: 0x10b981, weapon: 'Escopeta Calibre 12', primary: 'SHOTGUN', melee: 'Cuchillo Caza', heavy: 'Ninguna', grenades: 1 },
+                { name: 'Marcus', role: 'Pesado', color: 0xf59e0b, weapon: 'Ametralladora', primary: 'SMG', melee: 'Hacha de Mano', heavy: 'Bazuka RP3', grenades: 4 },
+                { name: 'Sarah', role: 'Tiradora', color: 0x3b82f6, weapon: 'Rifle Precisión', primary: 'SNIPER', melee: 'Machete', heavy: 'Granadas (2)', grenades: 2 },
+                { name: 'Carlos', role: 'Ingeniero', color: 0x8b5cf6, weapon: 'Pistola 9mm', primary: 'PISTOL', melee: 'Bate Reforzado', heavy: 'Lanza Granadas', grenades: 2 }
             ];
 
             survivors.length = 0;
@@ -186,6 +195,12 @@
                     stamina: 100,
                     ammo: 120,
                     weapon: cfg.weapon,
+                    primary: cfg.primary || 'PISTOL',
+                    grenades: cfg.grenades || 0,
+                    grenadeCooldown: 0,
+                    buildProgress: 0,
+                    buildTarget: null,
+                    craftCooldown: 0,
                     melee: cfg.melee,
                     heavy: cfg.heavy,
                     carriedCrate: null,
