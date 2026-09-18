@@ -272,6 +272,34 @@
             return true;
         }
 
+        // Ruido de combate: disparos y explosiones atraen zombies cercanos.
+        // {pos:Vector3(clon), radius, ttl} — ttl en segundos de juego.
+        const noiseEvents = [];
+        function pushNoise(x, z, radius, ttl) {
+            noiseEvents.push({ pos: new THREE.Vector3(x, 0, z), radius: radius || 25, ttl: ttl || 3 });
+            if (noiseEvents.length > 12) noiseEvents.shift();
+        }
+        function updateNoises(delta) {
+            const dt = delta * Math.max(0.001, (typeof gameSpeed !== 'undefined' ? gameSpeed : 1));
+            for (let i = noiseEvents.length - 1; i >= 0; i--) {
+                noiseEvents[i].ttl -= dt;
+                if (noiseEvents[i].ttl <= 0) noiseEvents.splice(i, 1);
+            }
+        }
+        // Watchdog generico de tarea: toda accion tiene inicio y fin.
+        // Devuelve true si vencio (el llamador debe abortar y replanificar).
+        const TASK_MAX = { heal: 25, fortify: 40, found: 200, repairStall: 45, towerStint: 90, zombieAttack: 12, zombieChase: 20 };
+        function taskExpired(store, key, maxSec, delta) {
+            if (!store) return false;
+            const dt = delta * Math.max(0.001, (typeof gameSpeed !== 'undefined' ? gameSpeed : 1));
+            store._taskTime = store._taskTime || {};
+            store._taskKey = store._taskKey || {};
+            if (store._taskKey._k !== key) { store._taskKey._k = key; store._taskTime._t = 0; return false; }
+            store._taskTime._t += dt;
+            if (store._taskTime._t >= maxSec) { store._taskTime._t = 0; store._taskKey._k = null; return true; }
+            return false;
+        }
+
         // Hitbox propia por unidad: nadie se apila (mundo + compañeros).
         // Si uno trabaja (hammering) el otro se aparta; dos trabajando no se pelean.
         const ENTITY_RADIUS = 0.55;
