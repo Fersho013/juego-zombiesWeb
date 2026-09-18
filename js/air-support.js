@@ -329,6 +329,24 @@ function nearestBarricade(pos, range) {
     return best;
 }
 
+function nearestWall(pos, range) {
+    let best = null, bestD = range;
+    for (const w of walls) {
+        if (w.health <= 0) continue;
+        const d = pos.distanceTo(w.position);
+        if (d < bestD) { bestD = d; best = w; }
+    }
+    return best;
+}
+
+function destroyWall(wall) {
+    scene.remove(wall.mesh);
+    const wi = walls.indexOf(wall);
+    if (wi > -1) walls.splice(wi, 1);
+    addLogEvent(`Un muro del refugio en ${ZONES[wall.shelterKey].name} fue derribado. Podra reconstruirse tras la oleada.`);
+    updateUI();
+}
+
 // ---------- Loop principal de apoyo aereo ----------
 function updateAirSupport(delta) {
     const dt = delta * Math.max(0.001, gameSpeed);
@@ -358,6 +376,7 @@ function updateAirSupport(delta) {
     updateGrenades(delta);
     updateLoot(dt);
     updateHealFX(dt);
+    updateTowerTurrets(dt);
 }
 
 // ==========================================================
@@ -556,9 +575,50 @@ function finishTower(tower) {
     tower.maxHealth = TOWER_HP;
     tower.mesh.scale.y = 1;
     completeTowerMesh(tower.mesh);
-    showToast(`Torre ${tower.id} terminada: puesto de francotirador listo.`);
-    addLogEvent(`¡Torre ${tower.id} completada! Los tiradores ya pueden subir.`);
+    // Torreta lanzamisiles sobre la plataforma (daño en area)
+    const head = new THREE.Group();
+    const dome = new THREE.Mesh(new THREE.SphereGeometry(0.55, 10, 8),
+        new THREE.MeshStandardMaterial({ color: 0xef4444, metalness: 0.5, roughness: 0.4 }));
+    head.add(dome);
+    [-0.25, 0.25].forEach(x => {
+        const tube = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 1.6, 8),
+            new THREE.MeshStandardMaterial({ color: 0x0f172a, metalness: 0.7 }));
+        tube.rotation.x = Math.PI / 2 - 0.35;
+        tube.position.set(x, 0.25, 0.6);
+        head.add(tube);
+    });
+    head.position.set(0, TOWER_HEIGHT + 0.5, 0);
+    tower.mesh.add(head);
+    tower.turret = { head: head, cooldown: 0, range: 30, damage: 70, radius: 8, fireRate: 2.5 };
+    showToast(`Torre ${tower.id} terminada: torreta de misiles operativa.`);
+    addLogEvent(`¡Torre ${tower.id} completada! Torreta lanzamisiles + puesto de francotirador listos.`);
     updateUI();
+}
+
+function updateTowerTurrets(dt) {
+    towers.forEach(tower => {
+        if (!tower.complete || tower.health <= 0 || !tower.turret) return;
+        const t = tower.turret;
+        t.cooldown = Math.max(0, t.cooldown - dt);
+        let nearest = null, minD = t.range;
+        zombies.forEach(z => {
+            if (z.health > 0 && !z.dying) {
+                const d = tower.pos.distanceTo(z.position);
+                if (d < minD) { minD = d; nearest = z; }
+            }
+        });
+        if (nearest) {
+            const dx = nearest.position.x - tower.pos.x;
+            const dz = nearest.position.z - tower.pos.z;
+            t.head.rotation.y += (Math.atan2(dx, dz) - t.head.rotation.y) * Math.min(1, dt * 5);
+            if (t.cooldown <= 0) {
+                t.cooldown = t.fireRate;
+                const top = tower.pos.clone().add(new THREE.Vector3(0, TOWER_HEIGHT + 0.5, 0));
+                fireMissile(top, nearest.position.clone());
+                playSound('turret', 'D2');
+            }
+        }
+    });
 }
 
 function destroyTower(tower) {
@@ -586,4 +646,71 @@ function nearestTower(pos, range, onlyComplete) {
         if (d < bestD) { bestD = d; best = t; }
     }
     return best;
+}
+
+// ==========================================================
+// RESCATE: helicoptero deja 5 supervivientes con cuerdas
+// ==========================================================
+function deliverRescueTeam(onLanded) {
+    let key = (ZONES[mainShelterKey] && ZONES[mainShelterKey].isActiveShelter) ? mainShelterKey : activeShelterKeys[0];
+    if (!key) {
+        const fb = ZONES['MALL'];
+        fb.intact = true; fb.isActiveShelter = true; fb.health = 50;
+        activeShelterKeys = ['MALL'];
+        mainShelterKey = 'MALL';
+        buildTurretAt('MALL', true);
+        key = 'MALL';
+    }
+    const hz = ZONES[key];
+    showAirBanner('Equipo de rescate en camino', 'fa-solid fa-helicopter text-emerald-300 text-lg');
+    addLogEvent('Un helicoptero de rescate trae un nuevo equipo de 5 supervivientes...');
+    const start = hz.pos.clone().add(new THREE.Vector3(70, 26, 70));
+    const hover = hz.pos.clone().add(new THREE.Vector3(0, 22, 0));
+    const built = createHelicopterModel(false);
+    built.group.position.copy(start);
+    scene.add(built.group);
+    const heli = { mesh: built.group, rotor: built.rotor };
+    const ropes = [];
+    const offs = [[-4, -2], [-2, 2], [0, -3], [2, 2], [4, -2]];
+    let phase = 0, t = 0;
+    const iv = setInterval(() => {
+        t += 0.05;
+        heli.rotor.rotation.y += 1.2;
+        if (phase === 0) { // aproximacion (~2s, tiempo real: juego en pausa)
+            heli.mesh.position.lerpVectors(start, hover, Math.min(1, t / 2));
+            if (t >= 2) {
+                phase = 1; t = 0;
+                initSurvivors();
+                survivors.forEach((s, i) => {
+                    s.homeZoneKey = key;
+                    s.position.set(hz.pos.x + offs[i][0], 20, hz.pos.z + offs[i][1]);
+                    s.thoughtText = 'Descolgandose del helicoptero...';
+                    const rope = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, 20, 6),
+                        new THREE.MeshStandardMaterial({ color: 0xe2e8f0 }));
+                    rope.position.set(s.position.x, 12, s.position.z);
+                    scene.add(rope);
+                    ropes.push(rope);
+                });
+                renderSurvivorTabs(); inspectSurvivor(0); updateUI();
+            }
+        } else if (phase === 1) { // descenso por las 5 cuerdas (~3s)
+            const k = Math.min(1, t / 3);
+            survivors.forEach(s => { s.position.y = 20 * (1 - k); });
+            if (t >= 3) {
+                phase = 2; t = 0;
+                survivors.forEach(s => { s.position.y = 0; s.thoughtText = 'Retomando la posicion...'; });
+                ropes.forEach(r => scene.remove(r));
+            }
+        } else { // retirada (~2s)
+            heli.mesh.position.y += 0.6;
+            heli.mesh.position.x += 1.2;
+            if (t >= 2) {
+                clearInterval(iv);
+                scene.remove(heli.mesh);
+                addLogEvent('Nuevo equipo en tierra. ¡A retomar la defensa donde quedaron!');
+                showToast('Equipo de rescate desplegado.');
+                if (onLanded) onLanded();
+            }
+        }
+    }, 50);
 }
