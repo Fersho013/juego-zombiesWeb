@@ -228,6 +228,7 @@
                 };
 
                 survivors.push(survivorData);
+                refreshWeaponMesh(survivorData); // arma 3D fisica segun su primary
             });
 
             renderSurvivorTabs();
@@ -236,7 +237,8 @@
 
         // Crea un modelo humanoide (usado por supervivientes y zombies) con
         // extremidades articuladas para permitir animación de caminata fluida.
-        function createHumanoidModel(bodyColor, headColor, scale = 1.0, eyeColor = null) {
+        // withGun=false para zombies (ellos no usan armas de fuego).
+        function createHumanoidModel(bodyColor, headColor, scale = 1.0, eyeColor = null, withGun = true) {
             const group = new THREE.Group();
             group.scale.setScalar(scale);
 
@@ -283,12 +285,116 @@
             const armR = makeLimb(false, 0.42);
             group.add(legL, legR, armL, armR);
 
-            // Arma visible en el brazo derecho (para supervivientes)
-            const gun = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.15, 0.6), new THREE.MeshStandardMaterial({ color: 0x1e293b }));
-            gun.position.set(0.22, 1.1, 0.35);
-            group.add(gun);
+            // Arma visible en el brazo derecho (solo supervivientes; se reemplaza
+            // por el modelo fisico del arma equipada con refreshWeaponMesh)
+            let gun = null;
+            if (withGun) {
+                gun = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.15, 0.6), new THREE.MeshStandardMaterial({ color: 0x1e293b }));
+                gun.position.set(0.22, 1.1, 0.35);
+                gun.name = 'hand-weapon';
+                group.add(gun);
+            }
 
             return { group, limbs: { legL, legR, armL, armR }, head, torso };
+        }
+
+        // Modelo 3D fisico segun el arma equipada (pistola, rifle, escopeta...)
+        function createWeaponMesh(weaponKey) {
+            const g = new THREE.Group();
+            const dark = new THREE.MeshStandardMaterial({ color: 0x1e293b, metalness: 0.6, roughness: 0.4 });
+            const wood = new THREE.MeshStandardMaterial({ color: 0x78350f, roughness: 0.8 });
+            function part(geo, mat, x, y, z, rx) {
+                const m = new THREE.Mesh(geo, mat);
+                m.position.set(x, y, z);
+                if (rx) m.rotation.x = rx;
+                m.castShadow = true;
+                g.add(m);
+                return m;
+            }
+            if (weaponKey === 'SHOTGUN') { // canon grueso + guardamano de madera
+                part(new THREE.CylinderGeometry(0.09, 0.09, 1.0, 8), dark, 0, 0, 0.3, Math.PI / 2);
+                part(new THREE.BoxGeometry(0.14, 0.14, 0.4), wood, 0, -0.05, 0.15);
+                part(new THREE.BoxGeometry(0.12, 0.16, 0.25), dark, 0, 0, -0.35);
+            } else if (weaponKey === 'SNIPER') { // canon largo fino + mira
+                part(new THREE.CylinderGeometry(0.05, 0.05, 1.4, 8), dark, 0, 0, 0.4, Math.PI / 2);
+                part(new THREE.CylinderGeometry(0.06, 0.06, 0.3, 8), dark, 0, 0.14, -0.1, Math.PI / 2);
+                part(new THREE.BoxGeometry(0.12, 0.18, 0.35), wood, 0, -0.02, -0.4);
+            } else if (weaponKey === 'RIFLE') { // fusil + cargador
+                part(new THREE.BoxGeometry(0.12, 0.14, 0.9), dark, 0, 0, 0.1);
+                part(new THREE.BoxGeometry(0.09, 0.25, 0.14), dark, 0, -0.16, 0.05);
+                part(new THREE.CylinderGeometry(0.04, 0.04, 0.3, 6), dark, 0, 0.02, 0.6, Math.PI / 2);
+            } else if (weaponKey === 'SMG') { // compacto + silenciador
+                part(new THREE.BoxGeometry(0.12, 0.14, 0.55), dark, 0, 0, 0);
+                part(new THREE.CylinderGeometry(0.055, 0.055, 0.35, 8), dark, 0, 0, 0.42, Math.PI / 2);
+            } else { // PISTOL por defecto
+                part(new THREE.BoxGeometry(0.11, 0.13, 0.4), dark, 0, 0, 0);
+                part(new THREE.BoxGeometry(0.09, 0.2, 0.1), dark, 0, -0.13, -0.12);
+            }
+            g.position.set(0.22, 1.1, 0.35);
+            return g;
+        }
+
+        function refreshWeaponMesh(survivor) {
+            if (!survivor || !survivor.mesh) return;
+            const old = survivor.mesh.getObjectByName('hand-weapon');
+            if (old) survivor.mesh.remove(old);
+            const w = createWeaponMesh(survivor.primary || 'PISTOL');
+            w.name = 'hand-weapon';
+            survivor.mesh.add(w);
+            survivor.weaponMesh = w;
+        }
+
+        // Casa-refugio de 4 muros (puertas + ventanas): cada muro es barricada con HP
+        function createShelterHouse(zoneKey) {
+            const zone = ZONES[zoneKey];
+            const group = new THREE.Group();
+            group.position.copy(zone.pos);
+            const wallMat = new THREE.MeshStandardMaterial({ color: 0xcbd5e1, roughness: 0.8 });
+            const frameMat = new THREE.MeshStandardMaterial({ color: 0x78350f, roughness: 0.9 });
+            const glassMat = new THREE.MeshStandardMaterial({ color: 0x38bdf8, roughness: 0.2, metalness: 0.4 });
+            const H = 7; // medio lado de la casa
+            const sides = [
+                { x: 0, z: -H, ry: 0 }, { x: 0, z: H, ry: 0 },
+                { x: -H, z: 0, ry: Math.PI / 2 }, { x: H, z: 0, ry: Math.PI / 2 }
+            ];
+            sides.forEach(side => {
+                const wall = new THREE.Mesh(new THREE.BoxGeometry(12, 2.6, 0.5), wallMat);
+                wall.position.set(zone.pos.x + side.x, 1.3, zone.pos.z + side.z);
+                wall.rotation.y = side.ry;
+                wall.castShadow = true;
+                wall.receiveShadow = true;
+                scene.add(wall);
+                // Puerta (marco + hueco oscuro)
+                const door = new THREE.Mesh(new THREE.BoxGeometry(1.6, 2.0, 0.6), frameMat);
+                door.position.set(wall.position.x, 1.0, wall.position.z);
+                door.rotation.y = side.ry;
+                scene.add(door);
+                group.add(door);
+                // Ventanas (cristal a cada lado de la puerta)
+                [-3.4, 3.4].forEach(off => {
+                    const win = new THREE.Mesh(new THREE.BoxGeometry(1.6, 1.0, 0.6), glassMat);
+                    const ox = side.ry === 0 ? off : 0;
+                    const oz = side.ry === 0 ? 0 : off;
+                    win.position.set(wall.position.x + ox, 1.6, wall.position.z + oz);
+                    win.rotation.y = side.ry;
+                    scene.add(win);
+                    group.add(win);
+                });
+                walls.push({ mesh: wall, health: WALL_HP, maxHealth: WALL_HP, position: wall.position, shelterKey: zoneKey });
+            });
+            // Losa de suelo
+            const slab = new THREE.Mesh(new THREE.BoxGeometry(15, 0.2, 15),
+                new THREE.MeshStandardMaterial({ color: 0x475569, roughness: 0.9 }));
+            slab.position.set(zone.pos.x, 0.1, zone.pos.z);
+            slab.receiveShadow = true;
+            scene.add(slab);
+            group.add(slab);
+            scene.add(group);
+            return group;
+        }
+
+        function shelterWallCount(zoneKey) {
+            return walls.filter(w => w.shelterKey === zoneKey && w.health > 0).length;
         }
 
         // ==========================================================
