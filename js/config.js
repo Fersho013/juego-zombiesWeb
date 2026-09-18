@@ -118,7 +118,11 @@
         // TAREA GRUPAL / HUIDA EN EQUIPO / SOLICITUDES (serie 5)
         // ==========================================================
         // Todos trabajan en la misma obra hasta terminarla antes de otra.
-        let groupTask = null; // {kind:'repair'|'found'|'tower', key, siteId}
+        // Orden oficial: 1 MAIN > 2 FOUND/TURRET-BASE > 3 COLLECT > 4 REPAIR(1 a la vez 100%) > 5 FIRST-TOWER > 6 REQUEST > 7 MORE-TOWERS
+        let groupTask = null; // {kind:'repair'|'found'|'tower'|'turret-base'|'collect', key, siteId}
+        let orderPhase = 'MAIN'; // fase actual del plan (solo informativo + bloqueo)
+        const ORDER_MIN_SHELTERS = 2; // paso 2: al menos 2 refugios
+        const ORDER_MIN_TURRETS = 2; // paso 2: al menos 2 torretas base
         // Huida conjunta: un solo destino compartido + offsets de formacion.
         let groupFlee = null; // {pos:Vector3, zoneKey}
         // Solicitudes del equipo ("El superviviente necesita...").
