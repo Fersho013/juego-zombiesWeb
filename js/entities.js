@@ -221,6 +221,7 @@
                     fleeTarget: null,
                     fleeZoneKey: null,
                     targetCrate: null,
+                    targetLoot: null, // loot exclusivo reclamado (uno por superviviente)
                     thoughtText: 'Explorando zona...',
                     shootCooldown: 0,
                     collapsed: false,
@@ -233,6 +234,47 @@
 
             renderSurvivorTabs();
             inspectSurvivor(0);
+        }
+
+        // Refuerzo individual: crea 1 superviviente (plantilla rotativa) en la zona dada.
+        // Usado por deliverReinforcements() para reponer exactamente los faltantes.
+        function spawnSingleSurvivor(homeKey, x, y, z) {
+            const templates = [
+                { name: 'Alex', role: 'Líder', color: 0xef4444, weapon: 'Rifle de Asalto', primary: 'RIFLE', melee: 'Machete Tactico', heavy: 'Granadas (3)', grenades: 3, medkits: 1 },
+                { name: 'Elena', role: 'Médico', color: 0x10b981, weapon: 'Escopeta Calibre 12', primary: 'SHOTGUN', melee: 'Cuchillo Caza', heavy: 'Ninguna', grenades: 1, medkits: 3 },
+                { name: 'Marcus', role: 'Pesado', color: 0xf59e0b, weapon: 'Ametralladora', primary: 'SMG', melee: 'Hacha de Mano', heavy: 'Bazuka RP3', grenades: 4, medkits: 1 },
+                { name: 'Sarah', role: 'Tiradora', color: 0x3b82f6, weapon: 'Rifle Precisión', primary: 'SNIPER', melee: 'Machete', heavy: 'Granadas (2)', grenades: 2, medkits: 1 },
+                { name: 'Carlos', role: 'Ingeniero', color: 0x8b5cf6, weapon: 'Pistola 9mm', primary: 'PISTOL', melee: 'Bate Reforzado', heavy: 'Lanza Granadas', grenades: 2, medkits: 1 }
+            ];
+            const usedNames = new Set(survivors.map(o => o.name));
+            const cfg = templates.find(t => !usedNames.has(t.name)) || templates[survivors.length % templates.length];
+            const built = createHumanoidModel(cfg.color, 0xfde047, 1.0);
+            const group = built.group;
+            group.position.set(x, y || 0, z);
+            scene.add(group);
+            const s = {
+                id: survivors.length,
+                name: cfg.name, role: cfg.role, colorHex: cfg.color,
+                mesh: group, limbs: built.limbs, animPhase: Math.random() * 10,
+                isMoving: false, position: group.position,
+                targetPos: new THREE.Vector3(x, 0, z),
+                health: 100, maxHealth: 100, stamina: 100, ammo: 120,
+                weapon: cfg.weapon, primary: cfg.primary || 'PISTOL',
+                grenades: cfg.grenades || 0, grenadeCooldown: 0,
+                armor: 0, medkits: cfg.medkits || 1, healTarget: null, healFXTimer: 0,
+                flares: 0, flareCooldown: 0, onTower: null,
+                buildProgress: 0, buildTarget: null, buildSlot: 0, craftCooldown: 0,
+                towerSiteId: null, melee: cfg.melee, heavy: cfg.heavy,
+                carriedCrate: null, kills: 0, homeZoneKey: homeKey,
+                aiState: 'DEFEND_BASE', fleeTarget: null, fleeZoneKey: null,
+                targetCrate: null, targetLoot: null,
+                thoughtText: 'Refuerzo listo...', shootCooldown: 0,
+                collapsed: false, collapseTimer: 0
+            };
+            survivors.push(s);
+            refreshWeaponMesh(s);
+            addLogEvent(`${s.name} (${s.role}) se une como refuerzo en ${ZONES[homeKey] ? ZONES[homeKey].name : homeKey}.`);
+            return s;
         }
 
         // Crea un modelo humanoide (usado por supervivientes y zombies) con
