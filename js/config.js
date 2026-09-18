@@ -217,5 +217,56 @@
             return true;
         }
 
+        // Hitbox propia por unidad: nadie se apila (mundo + compañeros).
+        const ENTITY_RADIUS = 0.55;
+        function separateEntities() {
+            // Supervivientes entre si + contra zombies vivos.
+            for (let i = 0; i < survivors.length; i++) {
+                const a = survivors[i];
+                if (!a || a.health <= 0 || !a.position) continue;
+                for (let j = i + 1; j < survivors.length; j++) {
+                    const b = survivors[j];
+                    if (!b || b.health <= 0 || !b.position) continue;
+                    pushApart(a, b, ENTITY_RADIUS * 2);
+                }
+                for (const z of zombies) {
+                    if (!z || z.health <= 0 || z.dying || !z.position) continue;
+                    pushApart(a, z, ENTITY_RADIUS * 2);
+                }
+            }
+            // Zombies entre si (solo vivos, radio segun escala).
+            for (let i = 0; i < zombies.length; i++) {
+                const a = zombies[i];
+                if (!a || a.health <= 0 || a.dying || !a.position) continue;
+                const ra = ENTITY_RADIUS * (a.mesh ? a.mesh.scale.x : 1);
+                for (let j = i + 1; j < zombies.length; j++) {
+                    const b = zombies[j];
+                    if (!b || b.health <= 0 || b.dying || !b.position) continue;
+                    const rb = ENTITY_RADIUS * (b.mesh ? b.mesh.scale.x : 1);
+                    pushApart(a, b, ra + rb);
+                }
+            }
+            // Re-resolver contra el mundo tras separar (escombros incluidos).
+            for (const s of survivors) {
+                if (s && s.health > 0) resolveEntityCollisions(s, true);
+            }
+            for (const z of zombies) {
+                if (z && z.health > 0 && !z.dying) resolveEntityCollisions(z, false);
+            }
+        }
+        function pushApart(a, b, minD) {
+            const dx = b.position.x - a.position.x;
+            const dz = b.position.z - a.position.z;
+            const d = Math.hypot(dx, dz);
+            if (d >= minD || d < 0.001) {
+                if (d < 0.001) { b.position.x += minD / 2; b.position.z += minD / 2; a.position.x -= minD / 2; a.position.z -= minD / 2; }
+                return;
+            }
+            const push = (minD - d) / 2;
+            const nx = dx / d, nz = dz / d;
+            a.position.x -= nx * push; a.position.z -= nz * push;
+            b.position.x += nx * push; b.position.z += nz * push;
+        }
+
         // Audio Synthesizer Engine
         let synthGun, synthExplosion, synthPickup, synthZombie, synthTurret;
