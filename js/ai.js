@@ -210,9 +210,9 @@
                 s.flareCooldown = Math.max(0, (s.flareCooldown || 0) - delta * gameSpeed);
                 s.healFXTimer = Math.max(0, (s.healFXTimer || 0) - delta * gameSpeed);
 
-                // Recoger loot cercano dejado por zombies
+                // Recoger loot cercano dejado por zombies (táctil).
                 for (let li = loots.length - 1; li >= 0; li--) {
-                    if (s.position.distanceTo(loots[li].position) < 1.6) {
+                    if (s.position.distanceTo(loots[li].position) < 2.2) {
                         collectLoot(s, loots[li]);
                         break;
                     }
@@ -380,7 +380,7 @@
                             if (s.targetCrate) {
                                 s.thoughtText = `Recolectando ${s.targetCrate.config.name} (paso 3)`;
                                 const distToCrate = s.position.distanceTo(s.targetCrate.position);
-                                if (distToCrate < 1.5) {
+                                if (distToCrate < 2.2) {
                                     pickupCrate(s, s.targetCrate);
                                     s.targetCrate = null;
                                     if (countAvailableCrates() === 0 && groupTask && groupTask.kind === 'collect') groupTask = null;
@@ -395,7 +395,7 @@
                                 if (s.targetLoot) {
                                     const dL = s.position.distanceTo(s.targetLoot.position);
                                     s.thoughtText = `Recogiendo suministro (paso 3)...`;
-                                    if (dL < 1.6) { collectLoot(s, s.targetLoot); s.targetLoot = null; }
+                                    if (dL < 2.2) { collectLoot(s, s.targetLoot); s.targetLoot = null; }
                                     else moveTowards(s, s.targetLoot.position, 0.11);
                                 } else {
                                     s.thoughtText = 'Buscando materiales...';
@@ -420,7 +420,7 @@
                                 s.thoughtText = `Recolectando ${s.targetCrate.config.name}`;
                                 const distToCrate = s.position.distanceTo(s.targetCrate.position);
 
-                                if (distToCrate < 1.5) {
+                                if (distToCrate < 2.2) {
                                     pickupCrate(s, s.targetCrate);
                                     s.targetCrate = null;
                                 } else {
@@ -429,7 +429,7 @@
                             } else if (s.targetLoot && loots.includes(s.targetLoot)) {
                                 s.thoughtText = `Recogiendo suministro...`;
                                 const dL = s.position.distanceTo(s.targetLoot.position);
-                                if (dL < 1.6) {
+                                if (dL < 2.2) {
                                     collectLoot(s, s.targetLoot);
                                     s.targetLoot = null;
                                 } else {
@@ -1143,8 +1143,10 @@
                 baseResources.ammo = Math.max(0, baseResources.ammo - 1);
             }
             s.towerSiteId = site.id;
+            // Táctil: tocar cualquier parte de la torre (hitbox 1.3 + cuerpo 0.55
+            // + holgura) basta para construir; van directo a tocarla.
             const d = s.position.distanceTo(site.pos);
-            if (d > 2.5) {
+            if (d > 3.4) {
                 s.thoughtText = `Yendo a la obra de la torre...`;
                 moveTowards(s, site.pos, 0.11);
                 return true;
@@ -1326,7 +1328,7 @@
             scene.add(wall);
             const rec = { mesh: wall, health: WALL_HP * 0.5, maxHealth: WALL_HP, position: wall.position, shelterKey: zoneKey };
             walls.push(rec);
-            if (typeof registerCollider === 'function') registerCollider(rec.position, 2.2, rec, 'wall', false);
+            if (typeof registerCollider === 'function') registerCollider(rec.position, 1.6, rec, 'wall', false);
             updateUI();
         }
 
