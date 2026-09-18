@@ -100,6 +100,18 @@
         const healFX = []; // cruces verdes flotantes
         let towerSeq = 0;
 
+        // ==========================================================
+        // REFUGIO PRINCIPAL / MUROS / GAME OVER (cambios serie 4)
+        // ==========================================================
+        let mainShelterKey = 'MALL'; // refugio principal: obras principales
+        const walls = []; // muros de casas-refugio {mesh, health, maxHealth, position, shelterKey}
+        let shelterFounder = null; // {zoneKey, progress, required}
+        const SHELTER_FOUND_COST = { ammo: 2, food: 1 };
+        const SHELTER_FOUND_WORK = 120; // segundos-trabajador para levantar la casa
+        const WALL_HP = 150;
+        let gameOverActive = false;
+        let prevGameSpeed = 1;
+
         let selectedSurvivorIndex = 0;
 
         // Audio Synthesizer Engine
