@@ -88,7 +88,7 @@
         // TORRES / LOOT / CURACION (cambios serie 3)
         // ==========================================================
         const FIXED_STEP = 1 / 60; // simulacion a 60 fps fijos
-        const TOWER_MAX = 2; // maximo de torres completas en pie
+        const TOWER_MAX = Infinity; // torres ilimitadas: construyen todas las que puedan
         const TOWER_WORK_REQUIRED = 400; // segundos-trabajador por torre
         const TOWER_HEIGHT = 8.4; // altura de la plataforma
         const TOWER_HP = 400;
@@ -113,6 +113,18 @@
         let prevGameSpeed = 1;
 
         let selectedSurvivorIndex = 0;
+
+        // ==========================================================
+        // TAREA GRUPAL / HUIDA EN EQUIPO / SOLICITUDES (serie 5)
+        // ==========================================================
+        // Todos trabajan en la misma obra hasta terminarla antes de otra.
+        let groupTask = null; // {kind:'repair'|'found'|'tower', key, siteId}
+        // Huida conjunta: un solo destino compartido + offsets de formacion.
+        let groupFlee = null; // {pos:Vector3, zoneKey}
+        // Solicitudes del equipo ("El superviviente necesita...").
+        const survivorRequests = { supply: false, airstrike: false, reinforce: false };
+        const survivorRequestCooldowns = { supply: 0, airstrike: 0, reinforce: 0 };
+        const SURVIVOR_REQUEST_COOLDOWN = 60; // segundos entre alertas del mismo tipo
 
         // Audio Synthesizer Engine
         let synthGun, synthExplosion, synthPickup, synthZombie, synthTurret;
