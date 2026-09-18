@@ -143,6 +143,12 @@
             currentWave++;
             spawnInitialCrates();
             waveTimer = 180;
+            // Limpiar huida/tarea grupal al cerrar la oleada.
+            if (typeof groupFlee !== 'undefined') groupFlee = null;
+            if (typeof groupTask !== 'undefined') groupTask = null;
+            survivors.forEach(s => {
+                if (s.health > 0) { s.fleeTarget = null; s.fleeZoneKey = null; s.targetLoot = null; }
+            });
 
             // Reparación parcial de todos los refugios activos tras la oleada
             activeShelterKeys.forEach(k => {
@@ -158,6 +164,14 @@
                     s.aiState = 'DEFEND_BASE';
                 }
             });
+
+            // REFUERZOS POST-OLEADA: helicoptero deja exactamente los faltantes (1-4).
+            const deadCount = survivors.filter(s => s.health <= 0).length;
+            if (deadCount > 0 && typeof deliverReinforcements === 'function') {
+                const queued = (typeof reinforceQueued !== 'undefined' && reinforceQueued) || (typeof survivorRequests !== 'undefined' && survivorRequests.reinforce);
+                addLogEvent(`Refuerzos en camino: el helicóptero traerá ${deadCount} superviviente(s)${queued ? ' (solicitado por el equipo)' : ''}.`);
+                setTimeout(() => deliverReinforcements(deadCount), 2500);
+            }
 
             const badge = document.getElementById('phase-badge');
             badge.className = 'flex items-center gap-1.5 font-bold px-3 py-1.5 rounded-xl border bg-cyan-500/20 text-cyan-300 border-cyan-500/30';
@@ -201,6 +215,7 @@
 
             if (type === 'airdrop') {
                 // Avion deja 1 caja de arma + 1 pesada por refugio con animacion
+                if (typeof survivorRequests !== 'undefined') survivorRequests.supply = false;
                 activeShelterKeys.forEach(key => {
                     planeSupplyDrop(key, ['RIFLE', 'GRENADE']);
                 });
@@ -208,6 +223,7 @@
                 showToast("Avion de suministros en camino.");
             } else if (type === 'artillery') {
                 // Helicoptero dispara misil AoE y se retira (daño aplicado al impactar)
+                if (typeof survivorRequests !== 'undefined') survivorRequests.airstrike = false;
                 heliMissileStrike();
                 addLogEvent("¡Helicoptero de ataque llamado sobre la horda!");
                 showToast("Helicoptero de ataque en camino.");
