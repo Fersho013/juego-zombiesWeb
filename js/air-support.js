@@ -245,11 +245,8 @@ function explodeAt(pos, radius, damage, ownerSurvivor) {
                 const falloff = 1 - (d / radius) * 0.5;
                 z.health -= damage * falloff;
                 if (z.health <= 0) {
-                    z.health = 0; z.dying = true; z.deathTimer = 0;
-                    dyingZombies.push(z);
-                    zombiesAliveCount = Math.max(0, zombiesAliveCount - 1);
+                    killZombie(z, ownerSurvivor || closestKillerTo(z.position, 25));
                     kills++;
-                    if (ownerSurvivor && ownerSurvivor.health > 0) ownerSurvivor.kills++;
                 }
             }
         }
@@ -317,7 +314,7 @@ function createSurvivorBarricade(x, z, fromAir) {
     bar.rotation.y = Math.random() * Math.PI;
     bar.castShadow = true;
     scene.add(bar);
-    const rec = { mesh: bar, health: 120, maxHealth: 120, position: bar.position, builtBy: fromAir ? 'Apoyo aereo' : 'Supervivientes' };
+    const rec = { mesh: bar, health: 120, maxHealth: 120, position: bar.position, owner: null, builtBy: fromAir ? 'Apoyo aereo' : 'Supervivientes' };
     barricades.push(rec);
     return rec;
 }
@@ -359,4 +356,234 @@ function updateAirSupport(delta) {
     }
     updateMissiles(dt);
     updateGrenades(delta);
+    updateLoot(dt);
+    updateHealFX(dt);
+}
+
+// ==========================================================
+// LOOT DE ZOMBIES (armadura, armas, granadas, bengalas, botiquin)
+// ==========================================================
+const LOOT_STYLE = {
+    ARMOR:   { color: 0x94a3b8, label: 'Blindaje' },
+    WEAPON:  { color: 0xfbbf24, label: 'Arma' },
+    GRENADE: { color: 0x22c55e, label: 'Granadas' },
+    MEDKIT:  { color: 0x10b981, label: 'Botiquin' },
+    FLARE:   { color: 0xf472b6, label: 'Bengala' }
+};
+
+function rollLootKind() {
+    const r = Math.random();
+    if (r < 0.25) return 'ARMOR';
+    if (r < 0.55) return 'WEAPON';
+    if (r < 0.75) return 'GRENADE';
+    if (r < 0.90) return 'MEDKIT';
+    return 'FLARE';
+}
+
+function rollWeaponPayload() {
+    const pool = ['RIFLE', 'RIFLE', 'SHOTGUN', 'SHOTGUN', 'SNIPER', 'SMG'];
+    return pool[Math.floor(Math.random() * pool.length)];
+}
+
+function spawnLootPickup(x, z) {
+    if (loots.length >= 30) { // tope: retirar el mas viejo
+        const old = loots.shift();
+        if (old) scene.remove(old.mesh);
+    }
+    const kind = rollLootKind();
+    const style = LOOT_STYLE[kind];
+    const group = new THREE.Group();
+    group.position.set(x, 0.7, z);
+    const gem = new THREE.Mesh(new THREE.OctahedronGeometry(0.45),
+        new THREE.MeshStandardMaterial({ color: style.color, emissive: style.color, emissiveIntensity: 0.45, roughness: 0.3 }));
+    gem.castShadow = true;
+    group.add(gem);
+    const ring = new THREE.Mesh(new THREE.RingGeometry(0.5, 0.75, 16),
+        new THREE.MeshBasicMaterial({ color: style.color, side: THREE.DoubleSide, transparent: true, opacity: 0.7 }));
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.y = -0.6;
+    group.add(ring);
+    scene.add(group);
+    loots.push({
+        mesh: group, gem: gem, kind: kind,
+        payload: kind === 'WEAPON' ? rollWeaponPayload() : null,
+        position: new THREE.Vector3(x, 0, z), age: 0
+    });
+}
+
+function collectLoot(s, loot) {
+    scene.remove(loot.mesh);
+    const li = loots.indexOf(loot);
+    if (li > -1) loots.splice(li, 1);
+    const wlabel = loot.payload && WEAPONS[loot.payload] ? WEAPONS[loot.payload].label : '';
+    if (loot.kind === 'ARMOR') {
+        s.armor = Math.min(100, s.armor + 30);
+        s.thoughtText = 'Blindaje recogido (+30)';
+        addLogEvent(`${s.name} recogio blindaje de un zombie (+30).`);
+    } else if (loot.kind === 'WEAPON') {
+        equipPrimary(s, loot.payload);
+        s.ammo = Math.min(250, s.ammo + 40);
+        s.thoughtText = `Recogi ${wlabel}`;
+    } else if (loot.kind === 'GRENADE') {
+        s.grenades = Math.min(8, s.grenades + 2);
+        s.heavy = `Granadas (${s.grenades})`;
+        s.thoughtText = 'Granadas recogidas (+2)';
+        addLogEvent(`${s.name} recogio granadas de un zombie (+2).`);
+    } else if (loot.kind === 'MEDKIT') {
+        s.medkits = Math.min(5, (s.medkits || 0) + 1);
+        s.health = Math.min(s.maxHealth, s.health + 25);
+        s.thoughtText = 'Botiquin aplicado (+25 salud)';
+        addLogEvent(`${s.name} uso un botiquin saqueado (+25 salud).`);
+    } else if (loot.kind === 'FLARE') {
+        s.flares = Math.min(3, (s.flares || 0) + 1);
+        s.thoughtText = 'Bengala recogida';
+        addLogEvent(`${s.name} recogio una pistola de bengalas.`);
+    }
+    playSound('pickup');
+    updateUI();
+}
+
+function updateLoot(dt) {
+    for (let i = loots.length - 1; i >= 0; i--) {
+        const l = loots[i];
+        l.age += dt;
+        l.gem.rotation.y += dt * 3;
+        l.mesh.position.y = 0.7 + Math.sin(l.age * 3) * 0.15;
+        if (l.age >= LOOT_DESPAWN) {
+            scene.remove(l.mesh);
+            loots.splice(i, 1);
+        }
+    }
+}
+
+// ==========================================================
+// CRUCES VERDES DE CURACION + LLAMARADAS DE QUEMADO
+// ==========================================================
+function spawnHealCross(pos) {
+    const g = new THREE.Group();
+    const mat = new THREE.MeshBasicMaterial({ color: 0x22ff55, transparent: true, opacity: 0.95 });
+    const v = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.6, 0.18), mat);
+    const h = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.18, 0.18), mat);
+    g.add(v, h);
+    g.position.copy(pos).add(new THREE.Vector3((Math.random() - 0.5), 1.6, (Math.random() - 0.5)));
+    scene.add(g);
+    healFX.push({ mesh: g, mat: mat, t: 0, dur: 1.4 });
+}
+
+function updateHealFX(dt) {
+    for (let i = healFX.length - 1; i >= 0; i--) {
+        const f = healFX[i];
+        f.t += dt / f.dur;
+        f.mesh.position.y += dt * 1.6;
+        f.mat.opacity = Math.max(0, 0.95 * (1 - f.t));
+        if (f.t >= 1) {
+            scene.remove(f.mesh);
+            healFX.splice(i, 1);
+        }
+    }
+}
+
+function createFlamePuff(pos) {
+    const p = new THREE.Mesh(new THREE.SphereGeometry(0.28, 6, 6),
+        new THREE.MeshBasicMaterial({ color: Math.random() > 0.4 ? 0xfb923c : 0xef4444, transparent: true, opacity: 0.9 }));
+    p.position.copy(pos).add(new THREE.Vector3((Math.random() - 0.5) * 0.8, 0.4, (Math.random() - 0.5) * 0.8));
+    scene.add(p);
+    setTimeout(() => scene.remove(p), 350);
+}
+
+// ==========================================================
+// TORRES DE VIGILANCIA (obra + torre completa)
+// ==========================================================
+function buildTowerScaffoldMesh() {
+    const g = new THREE.Group();
+    const wood = new THREE.MeshStandardMaterial({ color: 0x92600f, roughness: 0.9 });
+    [[-1.6, -1.6], [1.6, -1.6], [1.6, 1.6], [-1.6, 1.6]].forEach(([x, z]) => {
+        const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.26, 8, 8), wood);
+        pole.position.set(x, 4, z);
+        pole.castShadow = true;
+        g.add(pole);
+    });
+    [2, 5].forEach(y => {
+        const beam = new THREE.Mesh(new THREE.BoxGeometry(3.8, 0.25, 3.8), wood);
+        beam.position.y = y;
+        g.add(beam);
+    });
+    return g;
+}
+
+function completeTowerMesh(group) {
+    const wood = new THREE.MeshStandardMaterial({ color: 0x92600f, roughness: 0.9 });
+    const plat = new THREE.Mesh(new THREE.BoxGeometry(4.6, 0.4, 4.6), wood);
+    plat.position.y = TOWER_HEIGHT;
+    plat.castShadow = true;
+    group.add(plat);
+    // Barandilla
+    [[0, -2.2, 4.6, 0.15], [0, 2.2, 4.6, 0.15], [-2.2, 0, 0.15, 4.6], [2.2, 0, 0.15, 4.6]].forEach(([x, z, w, d]) => {
+        const rail = new THREE.Mesh(new THREE.BoxGeometry(w, 0.9, d), wood);
+        rail.position.set(x, TOWER_HEIGHT + 0.6, z);
+        group.add(rail);
+    });
+    // Bandera
+    const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 2.4, 6),
+        new THREE.MeshStandardMaterial({ color: 0xe2e8f0 }));
+    mast.position.set(1.8, TOWER_HEIGHT + 1.4, 1.8);
+    group.add(mast);
+    const flag = new THREE.Mesh(new THREE.PlaneGeometry(1.1, 0.7),
+        new THREE.MeshBasicMaterial({ color: 0x22c55e, side: THREE.DoubleSide }));
+    flag.position.set(1.2, TOWER_HEIGHT + 2.1, 1.8);
+    group.add(flag);
+}
+
+function createTowerSite(zoneKey, x, z) {
+    const mesh = buildTowerScaffoldMesh();
+    mesh.position.set(x, 0, z);
+    mesh.scale.y = 0.2;
+    scene.add(mesh);
+    const tower = {
+        id: ++towerSeq, mesh: mesh, pos: new THREE.Vector3(x, 0, z),
+        zoneKey: zoneKey, progress: 0, complete: false,
+        health: 200, maxHealth: 200, occupants: []
+    };
+    towers.push(tower);
+    showAirBanner('Los supervivientes comenzaron a construir', 'fa-solid fa-tower-observation text-amber-300 text-lg');
+    addLogEvent(`Los supervivientes comenzaron a construir una torre junto a ${ZONES[zoneKey].name} (0/${TOWER_WORK_REQUIRED}s).`);
+    return tower;
+}
+
+function finishTower(tower) {
+    tower.complete = true;
+    tower.health = TOWER_HP;
+    tower.maxHealth = TOWER_HP;
+    tower.mesh.scale.y = 1;
+    completeTowerMesh(tower.mesh);
+    showToast(`Torre ${tower.id} terminada: puesto de francotirador listo.`);
+    addLogEvent(`¡Torre ${tower.id} completada! Los tiradores ya pueden subir.`);
+    updateUI();
+}
+
+function destroyTower(tower) {
+    scene.remove(tower.mesh);
+    tower.occupants.slice().forEach(s => {
+        s.onTower = null;
+        s.position.y = 0;
+        s.health = Math.max(1, s.health - 15);
+        s.thoughtText = '¡La torre cayó, a tierra!';
+    });
+    tower.occupants.length = 0;
+    const ti = towers.indexOf(tower);
+    if (ti > -1) towers.splice(ti, 1);
+    survivors.forEach(s => { if (s.towerSiteId === tower.id) s.towerSiteId = null; });
+    addLogEvent(`¡La torre ${tower.id} fue destruida por la horda! Podran construir otra.`);
+    showToast(`Torre ${tower.id} destruida.`);
+    updateUI();
+}
+
+function nearestTower(pos, range, onlyComplete) {
+    let best = null, bestD = range;
+    for (const t of towers) {
+        if (onlyComplete && !t.complete) continue;
+        const d = pos.distanceTo(t.pos);
+        if (d < bestD) { bestD = d; best = t; }
+    }
+    return best;
 }
