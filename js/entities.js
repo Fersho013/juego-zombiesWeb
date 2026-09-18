@@ -421,6 +421,42 @@
             if (i > -1) doors.splice(i, 1);
             addLogEvent('Una puerta de supervivientes fue destruida por la horda.');
         }
+        // --- Refuerzo INDIVIDUAL (un superviviente por pieza) ---
+        // Muro nuevo (5m, HP completo) en la posicion dada.
+        function buildFortifyWall(shelterKey, x, z, ry) {
+            const mesh = new THREE.Mesh(new THREE.BoxGeometry(5, 2.6, 0.5),
+                new THREE.MeshStandardMaterial({ color: 0xcbd5e1, roughness: 0.8 }));
+            mesh.position.set(x, 1.3, z);
+            mesh.rotation.y = ry || 0;
+            mesh.castShadow = true;
+            mesh.receiveShadow = true;
+            scene.add(mesh);
+            const rec = { mesh: mesh, health: WALL_HP, maxHealth: WALL_HP, position: mesh.position, shelterKey: shelterKey };
+            walls.push(rec);
+            if (typeof registerCollider === 'function') registerCollider(rec.position, 2.2, rec, 'wall', false);
+            return rec;
+        }
+        // Ventana nueva (marco + tabla, HP 100): tapa parcial sin cerrar paso principal.
+        function buildFortifyWindow(shelterKey, x, z, ry) {
+            const grp = new THREE.Group();
+            grp.position.set(x, 0, z);
+            grp.rotation.y = ry || 0;
+            const frameMat = new THREE.MeshStandardMaterial({ color: 0x78350f, roughness: 0.9 });
+            const boardMat = new THREE.MeshStandardMaterial({ color: 0x92400e, roughness: 0.9 });
+            const sill = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.3, 0.5), frameMat);
+            sill.position.y = 1.1;
+            grp.add(sill);
+            const boards = new THREE.Mesh(new THREE.BoxGeometry(2.2, 1.2, 0.25), boardMat);
+            boards.position.y = 1.8;
+            boards.rotation.z = 0.08;
+            boards.castShadow = true;
+            grp.add(boards);
+            scene.add(grp);
+            const rec = { mesh: grp, health: 100, maxHealth: 100, position: grp.position, shelterKey: shelterKey, isWindow: true };
+            walls.push(rec);
+            if (typeof registerCollider === 'function') registerCollider(rec.position, 1.2, rec, 'wall', false);
+            return rec;
+        }
         // Casa-refugio con PUERTA ABIERTA por lado (hueco 2m) y ventanas destruidas
         // (marcos rotos, sin cristal: acceso libre). Niveles: 1 mini / 2 casa / 3 fortaleza.
         function createShelterHouse(zoneKey, level) {
