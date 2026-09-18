@@ -316,6 +316,7 @@ function createSurvivorBarricade(x, z, fromAir) {
     scene.add(bar);
     const rec = { mesh: bar, health: 120, maxHealth: 120, position: bar.position, owner: null, builtBy: fromAir ? 'Apoyo aereo' : 'Supervivientes' };
     barricades.push(rec);
+    if (typeof registerCollider === 'function') registerCollider(rec.position, 1.6, rec, 'barricade', false);
     return rec;
 }
 
@@ -341,6 +342,7 @@ function nearestWall(pos, range) {
 
 function destroyWall(wall) {
     scene.remove(wall.mesh);
+    if (typeof unregisterColliderForRef === 'function') unregisterColliderForRef(wall);
     const wi = walls.indexOf(wall);
     if (wi > -1) walls.splice(wi, 1);
     addLogEvent(`Un muro del refugio en ${ZONES[wall.shelterKey].name} fue derribado. Podra reconstruirse tras la oleada.`);
@@ -553,16 +555,19 @@ function completeTowerMesh(group) {
     group.add(flag);
 }
 
-function createTowerSite(zoneKey, x, z) {
+function createTowerSite(zoneKey, x, z, roof) {
     const mesh = buildTowerScaffoldMesh();
-    mesh.position.set(x, 0, z);
+    // Torres en techo van elevadas sobre la casa (base a 2.6m).
+    const baseY = roof ? 2.6 : 0;
+    mesh.position.set(x, baseY, z);
     mesh.scale.y = 0.2;
     scene.add(mesh);
     const tower = {
-        id: ++towerSeq, mesh: mesh, pos: new THREE.Vector3(x, 0, z),
+        id: ++towerSeq, mesh: mesh, pos: new THREE.Vector3(x, baseY, z),
         zoneKey: zoneKey, progress: 0, complete: false,
-        health: 200, maxHealth: 200, occupants: []
+        health: 200, maxHealth: 200, occupants: [], roof: !!roof
     };
+    if (typeof registerCollider === 'function') registerCollider(tower.pos, 2.2, tower, 'tower', false);
     towers.push(tower);
     showAirBanner('Los supervivientes comenzaron a construir', 'fa-solid fa-tower-observation text-amber-300 text-lg');
     addLogEvent(`Los supervivientes comenzaron a construir una torre junto a ${ZONES[zoneKey].name} (0/${TOWER_WORK_REQUIRED}s).`);
@@ -623,6 +628,7 @@ function updateTowerTurrets(dt) {
 
 function destroyTower(tower) {
     scene.remove(tower.mesh);
+    if (typeof unregisterColliderForRef === 'function') unregisterColliderForRef(tower);
     tower.occupants.slice().forEach(s => {
         s.onTower = null;
         s.position.y = 0;
