@@ -506,9 +506,14 @@
                 const isSurvivor = !entity.typeKey; // zombies tienen typeKey
                 const step = speed * gameSpeed;
                 if (typeof tryMoveWithCollisions === 'function') {
+                    const ox = entity.position.x, oz = entity.position.z;
                     tryMoveWithCollisions(entity, targetPos, step, isSurvivor);
-                    // Zombies destruyen entorno destructible que bloquee el paso.
-                    if (!isSurvivor && typeof damageBlockingEnv === 'function') damageBlockingEnv(entity);
+                    const moved = Math.hypot(entity.position.x - ox, entity.position.z - oz);
+                    // Bloqueado: si no puede acceder, destruye el muro/escombro de enfrente.
+                    if (moved < step * 0.25) {
+                        if (!isSurvivor && typeof damageBlockingEnv === 'function') damageBlockingEnv(entity);
+                        if (isSurvivor && typeof damageBlockingAsSurvivor === 'function') damageBlockingAsSurvivor(entity);
+                    }
                 } else {
                     dir.normalize();
                     entity.position.addScaledVector(dir, step);
@@ -518,6 +523,45 @@
             } else {
                 entity.isMoving = false;
             }
+        }
+        // Superviviente bloqueado: demuele el muro/escombro que impide acceder
+        // (no toca sus propias puertas: esas las cruza).
+        function damageBlockingAsSurvivor(s) {
+            if (!s || s.health <= 0) return false;
+            s.demoCooldown = Math.max(0, (s.demoCooldown || 0) - 1);
+            if (s.demoCooldown > 0) return false;
+            // 1) Muro de refugio ajeno/bloqueante a <2.5u.
+            const wb = (typeof nearestWall === 'function') ? nearestWall(s.position, 2.5) : null;
+            if (wb && wb.shelterKey !== s.homeZoneKey) {
+                wb.health -= 25;
+                s.demoCooldown = 30;
+                s.hammering = true;
+                s.thoughtText = 'Derribando muro que bloquea el paso...';
+                if (wb.health <= 0 && typeof destroyWall === 'function') {
+                    destroyWall(wb);
+                    addLogEvent(`${s.name} demolió un muro que bloqueaba el acceso.`);
+                }
+                return true;
+            }
+            // 2) Escombro residencial o ruina destructible a <2.5u.
+            for (const c of colliders) {
+                if (c.kind !== 'env' || !c.destructible) continue;
+                if (c.kind === 'door') continue;
+                const d = Math.hypot(s.position.x - c.pos.x, s.position.z - c.pos.z);
+                if (d < c.radius + 1.5) {
+                    c.ref.hp -= 25;
+                    s.demoCooldown = 30;
+                    s.hammering = true;
+                    s.thoughtText = 'Despejando escombros para re-armar la casa...';
+                    if (c.ref.hp <= 0) {
+                        if (c.ref.mesh) scene.remove(c.ref.mesh);
+                        unregisterColliderForRef(c.ref);
+                        addLogEvent(`${s.name} despejó escombros residenciales. Lote listo para refugio custom.`);
+                    }
+                    return true;
+                }
+            }
+            return false;
         }
         // Si un zombie choca con entorno destructible, lo golpea para abrir paso.
         function damageBlockingEnv(z) {
@@ -529,10 +573,12 @@
                     c.ref.hp -= z.damage * 0.5;
                     z.attackCooldown = 1.2;
                     z.isMoving = false;
-                    if (c.ref.hp <= 0 && c.ref.mesh) {
-                        scene.remove(c.ref.mesh);
+                    if (c.ref.hp <= 0) {
+                        if (c.ref.mesh) scene.remove(c.ref.mesh);
                         unregisterColliderForRef(c.ref);
-                        addLogEvent('La horda destruyó un obstáculo del entorno para abrirse paso.');
+                        addLogEvent(c.ref.residential
+                            ? 'La horda arrasó escombros residenciales para abrirse paso.'
+                            : 'La horda destruyó un obstáculo del entorno para abrirse paso.');
                     }
                     return true;
                 }
@@ -1239,7 +1285,10 @@
             if (!shelterFounder) {
                 if (baseResources.ammo < SHELTER_FOUND_COST.ammo || baseResources.food < SHELTER_FOUND_COST.food) return false;
                 if (s.role !== 'Ingeniero' && s.role !== 'Líder' && Math.random() > 0.002 * gameSpeed) return false;
-                const candidateKey = Object.keys(ZONES).find(k => !ZONES[k].isActiveShelter && ZONES[k].intact);
+                // Prioridad: re-armar las casas residenciales destruidas como refugio custom.
+                let candidateKey = null;
+                if (ZONES.HOUSES && !ZONES.HOUSES.isActiveShelter && ZONES.HOUSES.intact) candidateKey = 'HOUSES';
+                if (!candidateKey) candidateKey = Object.keys(ZONES).find(k => !ZONES[k].isActiveShelter && ZONES[k].intact);
                 if (!candidateKey) return false;
                 baseResources.ammo -= SHELTER_FOUND_COST.ammo;
                 baseResources.food -= SHELTER_FOUND_COST.food;
