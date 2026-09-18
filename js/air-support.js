@@ -237,6 +237,7 @@ function heliCarryStep(u) {
 function explodeAt(pos, radius, damage, ownerSurvivor) {
     createExplosionFX(pos, radius);
     playSound('explosion');
+    if (typeof pushNoise === 'function') pushNoise(pos.x, pos.z, 40, 5);
     let kills = 0;
     zombies.forEach(z => {
         if (z.health > 0 && !z.dying) {
