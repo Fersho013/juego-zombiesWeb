@@ -140,6 +140,28 @@
                 s.shootCooldown = Math.max(0, s.shootCooldown - delta);
                 s.grenadeCooldown = Math.max(0, (s.grenadeCooldown || 0) - delta * gameSpeed);
                 s.craftCooldown = Math.max(0, (s.craftCooldown || 0) - delta * gameSpeed);
+                s.flareCooldown = Math.max(0, (s.flareCooldown || 0) - delta * gameSpeed);
+                s.healFXTimer = Math.max(0, (s.healFXTimer || 0) - delta * gameSpeed);
+
+                // Recoger loot cercano dejado por zombies
+                for (let li = loots.length - 1; li >= 0; li--) {
+                    if (s.position.distanceTo(loots[li].position) < 1.6) {
+                        collectLoot(s, loots[li]);
+                        break;
+                    }
+                }
+
+                // Bengala automatica si esta bajo de municion
+                if (s.flares > 0 && s.ammo < 40 && s.flareCooldown <= 0 && !isWaveActive) {
+                    const hz = ZONES[s.homeZoneKey];
+                    if (hz) {
+                        s.flares--;
+                        s.flareCooldown = 90;
+                        planeSupplyDrop(s.homeZoneKey, ['WEAPON', 'MED']);
+                        showAirBanner('Bengala lanzada: apoyo en camino', 'fa-solid fa-fire text-pink-300 text-lg');
+                        addLogEvent(`${s.name} lanzo una bengala y pidio suministros.`);
+                    }
+                }
 
                 let nearestZombie = null;
                 let minDist = 999;
@@ -152,7 +174,8 @@
                 });
 
                 const wconf = WEAPONS[s.primary] || WEAPONS.PISTOL;
-                if (nearestZombie && minDist < wconf.range && s.aiState !== 'FLEE') {
+                const effRange = wconf.range * (s.onTower ? 1.3 : 1); // bonus de altura
+                if (nearestZombie && minDist < effRange && s.aiState !== 'FLEE') {
                     aimTowards(s, nearestZombie.position);
                     // Granada si hay grupo compacto y tiene stock
                     if (s.grenades > 0 && s.grenadeCooldown <= 0 && minDist < 16 && countNearbyZombies(nearestZombie.position, 6) >= 3) {
@@ -162,6 +185,11 @@
                         fireSurvivorWeapon(s, nearestZombie);
                     }
                 }
+
+                // PRIORIDAD 1 (global): curar aliados heridos con botiquin
+                // (los francotiradores en torre no abandonan su puesto para curar)
+                let healBusy = false;
+                if (s.aiState !== 'FLEE' && !s.onTower) healBusy = updateSurvivorHeal(s, delta);
 
                 if (isWaveActive) {
                     const homeZone = ZONES[s.homeZoneKey] && ZONES[s.homeZoneKey].intact ? ZONES[s.homeZoneKey] : ZONES[activeShelterKeys[0] || 'MALL'];
@@ -178,6 +206,7 @@
                     }
 
                     if (s.aiState === 'FLEE') {
+                        if (s.onTower) dismountTower(s); // abandona la torre para huir
                         s.thoughtText = '¡Replegándonos, nos superan en número!';
                         moveTowards(s, s.fleeTarget, 0.155);
                         const arrived = s.position.distanceTo(s.fleeTarget) < 3;
@@ -196,21 +225,31 @@
                                 s.fleeZoneKey = dest.zoneKey;
                             }
                         }
+                    } else if (!healBusy) {
+                        // Puesto de francotirador en torre si hay sitio libre
+                        if (!updateTowerOccupy(s, homeZone)) {
+                            s.aiState = 'DEFEND_BASE';
+                            s.thoughtText = `Defendiendo ${homeZone.name}`;
+                            const defPos = homeZone.pos.clone().add(new THREE.Vector3(Math.cos(s.id * 1.7) * homeZone.radius * 0.4, 0, Math.sin(s.id * 1.7) * homeZone.radius * 0.4));
+                            if (s.position.distanceTo(defPos) > 2) {
+                                moveTowards(s, defPos, 0.12);
+                            } else {
+                                s.isMoving = false;
+                            }
+                        } else {
+                            s.aiState = 'DEFEND_BASE';
+                        }
                     } else {
                         s.aiState = 'DEFEND_BASE';
-                        s.thoughtText = `Defendiendo ${homeZone.name}`;
-                        const defPos = homeZone.pos.clone().add(new THREE.Vector3(Math.cos(s.id * 1.7) * homeZone.radius * 0.4, 0, Math.sin(s.id * 1.7) * homeZone.radius * 0.4));
-                        if (s.position.distanceTo(defPos) > 2) {
-                            moveTowards(s, defPos, 0.12);
-                        } else {
-                            s.isMoving = false;
-                        }
                     }
                 } else {
                     s.aiState = 'SCAVENGE';
                     const homeZone = ZONES[s.homeZoneKey] || ZONES['MALL'];
+                    if (s.onTower) dismountTower(s); // de dia se baja a trabajar
 
-                    if (s.carriedCrate) {
+                    if (healBusy) {
+                        // Curando a un aliado: sin otras tareas este frame
+                    } else if (s.carriedCrate) {
                         s.thoughtText = `Transportando ${s.carriedCrate.config.name} a Base`;
                         const distToBase = s.position.distanceTo(homeZone.pos);
 
@@ -234,11 +273,13 @@
                                 moveTowards(s, s.targetCrate.position, 0.11);
                             }
                         } else {
-                            // Sin cajas: fabricar con excedente o construir barricada
+                            // Sin cajas: fabricar, barricada y al ultimo la torre
                             if (maybeCraftSupplyCrate(s)) {
                                 // fabricada este frame
                             } else if (updateSurvivorBuild(s, delta, homeZone)) {
-                                // construyendo este frame
+                                // construyendo barricada este frame
+                            } else if (updateTowerWork(s, delta, homeZone)) {
+                                // trabajando en la torre este frame
                             } else {
                                 s.thoughtText = "Patrullando perímetro...";
                                 const patrolPos = homeZone.pos.clone().add(new THREE.Vector3(Math.cos(s.id + clock.getElapsedTime() * 0.5) * 10, 0, Math.sin(s.id + clock.getElapsedTime() * 0.5) * 10));
@@ -363,8 +404,9 @@
             const crateType = survivor.carriedCrate.typeKey;
 
             if (crateType === 'WEAPON') { baseResources.ammo += 2; survivor.ammo = Math.min(250, survivor.ammo + 50); }
-            else if (crateType === 'MED') baseResources.meds += 2;
+            else if (crateType === 'MED') { baseResources.meds += 2; survivor.medkits = Math.min(5, (survivor.medkits || 0) + 2); survivor.health = Math.min(survivor.maxHealth, survivor.health + 20); }
             else if (crateType === 'FOOD') baseResources.food += 2;
+            else if (crateType === 'ARMOR') { survivor.armor = Math.min(100, survivor.armor + 40); baseResources.ammo += 1; }
             else if (crateType === 'HEAVY') baseResources.heavy += 1;
             // Nuevo arsenal: la caja otorga el arma directamente al portador
             else if (crateType === 'RIFLE') { equipPrimary(survivor, 'RIFLE'); survivor.ammo = Math.min(250, survivor.ammo + 80); baseResources.ammo += 1; }
@@ -413,21 +455,42 @@
             return true;
         }
 
-        // Construccion de barricadas por supervivientes cerca del refugio
-        function findBarricadeSpot(zone) {
-            const ang = Math.random() * Math.PI * 2;
-            const r = zone.radius * 0.55 + 4 + Math.random() * 3;
-            return new THREE.Vector3(zone.pos.x + Math.cos(ang) * r, 0, zone.pos.z + Math.sin(ang) * r);
+        // Barricadas en cuadrado defensivo (max 4 vivas por superviviente)
+        const BARRICADE_SQUARE = [[-7, -7], [7, -7], [7, 7], [-7, 7]];
+
+        function countOwnBarricades(s) {
+            let n = 0;
+            barricades.forEach(b => { if (b.owner === s && b.health > 0) n++; });
+            return n;
+        }
+
+        function findBarricadeSpot(s, zone) {
+            // Esquina libre del cuadrado centrada en su puesto de defensa
+            const cx = zone.pos.x + Math.cos(s.id * 1.7) * zone.radius * 0.4;
+            const cz = zone.pos.z + Math.sin(s.id * 1.7) * zone.radius * 0.4;
+            for (let k = 0; k < 4; k++) {
+                const slot = (s.buildSlot + k) % 4;
+                const px = cx + BARRICADE_SQUARE[slot][0];
+                const pz = cz + BARRICADE_SQUARE[slot][1];
+                let occupied = false;
+                barricades.forEach(b => {
+                    if (b.health > 0 && Math.hypot(b.position.x - px, b.position.z - pz) < 2.5) occupied = true;
+                });
+                if (!occupied) { s.buildSlot = slot; return new THREE.Vector3(px, 0, pz); }
+            }
+            return null;
         }
 
         function updateSurvivorBuild(s, delta, homeZone) {
-            // Iniciar construccion: sin oleada, con recurso y cerca de base
+            // Tope: 4 barricadas vivas por superviviente
+            if (countOwnBarricades(s) >= BARRICADES_PER_SURVIVOR) return false;
+            // Iniciar construccion: sin oleada y con recurso
             if (!s.buildTarget) {
                 if (isWaveActive) return false;
                 if (baseResources.ammo < 1) return false;
                 if (s.role !== 'Ingeniero' && Math.random() > 0.004 * gameSpeed) return false;
-                if (nearestBarricade(s.position, 6)) return false;
-                s.buildTarget = findBarricadeSpot(homeZone);
+                s.buildTarget = findBarricadeSpot(s, homeZone);
+                if (!s.buildTarget) return false; // cuadrado completo
                 s.buildProgress = 0;
                 s.thoughtText = 'Buscando punto para barricada...';
             }
@@ -444,13 +507,178 @@
             s.thoughtText = `Construyendo barricada ${Math.min(99, Math.round(s.buildProgress / 3 * 100))}%`;
             if (s.buildProgress >= 3) {
                 baseResources.ammo = Math.max(0, baseResources.ammo - 1);
-                createSurvivorBarricade(s.buildTarget.x, s.buildTarget.z, false);
-                addLogEvent(`${s.name} construyo una barricada cerca de ${homeZone.name}.`);
+                const rec = createSurvivorBarricade(s.buildTarget.x, s.buildTarget.z, false);
+                rec.owner = s;
+                s.buildSlot = (s.buildSlot + 1) % 4;
+                addLogEvent(`${s.name} construyo una barricada (${countOwnBarricades(s)}/${BARRICADES_PER_SURVIVOR}) cerca de ${homeZone.name}.`);
                 s.buildTarget = null;
                 s.buildProgress = 0;
                 updateUI();
             }
             return true;
+        }
+
+        // ==========================================================
+        // CURACION DE ALIADOS (PRIORIDAD 1)
+        // ==========================================================
+        function findWoundedAlly(s) {
+            let best = null, bestD = 14;
+            survivors.forEach(o => {
+                if (o === s || o.health <= 0 || o.onTower) return; // en torre estan a salvo e inalcanzables
+                if (o.health >= o.maxHealth * 0.65) return;
+                const d = s.position.distanceTo(o.position);
+                if (d < bestD) { bestD = d; best = o; }
+            });
+            return best;
+        }
+
+        function updateSurvivorHeal(s, delta) {
+            if ((s.medkits || 0) <= 0) { s.healTarget = null; return false; }
+            let ally = s.healTarget;
+            if (!ally || ally.health <= 0 || ally.onTower || ally.health >= ally.maxHealth * 0.95) {
+                ally = findWoundedAlly(s);
+                s.healTarget = ally;
+            }
+            if (!ally) return false;
+            const d = s.position.distanceTo(ally.position);
+            if (d > 2.2) {
+                s.thoughtText = `Corriendo a curar a ${ally.name}...`;
+                moveTowards(s, ally.position, 0.13);
+                return true;
+            }
+            // Canalizando cura: 25/s (Elena 35/s), consume 1 botiquin por aliado
+            s.isMoving = false;
+            aimTowards(s, ally.position);
+            const rate = s.role === 'Médico' ? 35 : 25;
+            ally.health = Math.min(ally.maxHealth, ally.health + rate * delta * gameSpeed);
+            s.thoughtText = `Curando a ${ally.name}...`;
+            ally.thoughtText = `${s.name} me esta curando...`;
+            if (s.healFXTimer <= 0) {
+                spawnHealCross(ally.position);
+                s.healFXTimer = 0.4;
+            }
+            if (ally.health >= ally.maxHealth * 0.95) {
+                s.medkits--;
+                addLogEvent(`${s.name} curo a ${ally.name} con un botiquin.`);
+                s.healTarget = null;
+                updateUI();
+            }
+            return true;
+        }
+
+        // ==========================================================
+        // TORRES DE VIGILANCIA (ULTIMA PRIORIDAD)
+        // ==========================================================
+        function countCompleteTowers() {
+            return towers.filter(t => t.complete).length;
+        }
+
+        function findTowerSite() {
+            return towers.find(t => !t.complete) || null;
+        }
+
+        // Durante la oleada: subir a una torre completa con sitio libre
+        function updateTowerOccupy(s, homeZone) {
+            if (s.onTower) {
+                s.isMoving = false;
+                s.thoughtText = `Cubriendo desde torre ${s.onTower.id}`;
+                // Mantener posicion de plataforma
+                const slot = s.onTower.occupants.indexOf(s);
+                const ox = s.onTower.pos.x + (slot === 0 ? -1 : 1);
+                s.position.set(ox, TOWER_HEIGHT + 0.4, s.onTower.pos.z);
+                return true;
+            }
+            const tower = nearestTower(s.position, 60, true);
+            if (!tower || tower.occupants.length >= 2) return false;
+            if (s.position.distanceTo(tower.pos) > 3) {
+                s.thoughtText = `Subiendo a torre ${tower.id}...`;
+                const base = tower.pos.clone();
+                if (s.position.distanceTo(base) > 1.5) moveTowards(s, base, 0.13);
+                else {
+                    tower.occupants.push(s);
+                    s.onTower = tower;
+                    s.isMoving = false;
+                    addLogEvent(`${s.name} subio a la torre ${tower.id} como vigia.`);
+                }
+                return true;
+            }
+            tower.occupants.push(s);
+            s.onTower = tower;
+            s.isMoving = false;
+            return true;
+        }
+
+        function dismountTower(s) {
+            if (!s.onTower) return;
+            const t = s.onTower;
+            const oi = t.occupants.indexOf(s);
+            if (oi > -1) t.occupants.splice(oi, 1);
+            s.onTower = null;
+            s.position.y = 0;
+            s.position.x += 3;
+        }
+
+        // Fuera de oleada y sin nada que hacer: aportar 1s por segundo a la obra
+        function updateTowerWork(s, delta, homeZone) {
+            if (isWaveActive) return false;
+            if (countCompleteTowers() + (findTowerSite() ? 1 : 0) >= TOWER_MAX && !findTowerSite()) return false;
+            let site = towers.find(t => !t.complete && t.id === s.towerSiteId) || findTowerSite();
+            if (!site) {
+                if (countCompleteTowers() >= TOWER_MAX) return false;
+                // Fundar obra cerca del refugio (requiere 1 de municion como materiales)
+                if (baseResources.ammo < 1) return false;
+                const ang = Math.random() * Math.PI * 2;
+                const r = homeZone.radius + 10;
+                site = createTowerSite(s.homeZoneKey, homeZone.pos.x + Math.cos(ang) * r, homeZone.pos.z + Math.sin(ang) * r);
+                baseResources.ammo = Math.max(0, baseResources.ammo - 1);
+            }
+            s.towerSiteId = site.id;
+            const d = s.position.distanceTo(site.pos);
+            if (d > 2.5) {
+                s.thoughtText = `Yendo a la obra de la torre...`;
+                moveTowards(s, site.pos, 0.11);
+                return true;
+            }
+            s.isMoving = false;
+            aimTowards(s, site.pos);
+            site.progress += delta * gameSpeed; // 1s aportado por segundo trabajado
+            site.mesh.scale.y = Math.min(1, 0.2 + 0.8 * (site.progress / TOWER_WORK_REQUIRED));
+            s.thoughtText = `Construyendo torre ${Math.floor(site.progress)}/${TOWER_WORK_REQUIRED}s`;
+            if (site.progress >= TOWER_WORK_REQUIRED) {
+                finishTower(site);
+                survivors.forEach(o => { if (o.towerSiteId === site.id) o.towerSiteId = null; });
+            }
+            return true;
+        }
+
+        // ==========================================================
+        // MUERTE CENTRALIZADA: baja + loot
+        // ==========================================================
+        function killZombie(z, ownerSurvivor) {
+            if (!z || z.health > 0 || z.dying) return;
+            z.health = 0;
+            z.dying = true;
+            z.deathTimer = 0;
+            z.burned = false;
+            dyingZombies.push(z);
+            zombiesAliveCount = Math.max(0, zombiesAliveCount - 1);
+            if (ownerSurvivor && ownerSurvivor.health > 0) ownerSurvivor.kills++;
+            // Loot en el punto de caida
+            if (Math.random() < LOOT_CHANCE) {
+                spawnLootPickup(z.position.x, z.position.z);
+            }
+            if (zombiesAliveCount === 0 && isWaveActive) endWaveSuccess();
+            updateUI();
+        }
+
+        function closestKillerTo(pos, range) {
+            let best = null, bestD = range;
+            survivors.forEach(s => {
+                if (s.health <= 0) return;
+                const d = s.position.distanceTo(pos);
+                if (d < bestD) { bestD = d; best = s; }
+            });
+            return best;
         }
 
         // ==========================================================
@@ -498,7 +726,7 @@
                 let minDist = 999;
 
                 survivors.forEach(s => {
-                    if (s.health > 0) {
+                    if (s.health > 0 && !s.onTower) { // en torre estan fuera de alcance
                         const d = z.position.distanceTo(s.position);
                         if (d < minDist) { minDist = d; targetSurvivor = s; }
                     }
@@ -508,7 +736,13 @@
                     moveTowards(z, targetSurvivor.position, z.speed);
 
                     if (minDist < 1.5 && z.attackCooldown <= 0) {
-                        targetSurvivor.health -= z.damage;
+                        let dmg = z.damage;
+                        if (targetSurvivor.armor > 0) { // el blindaje absorbe la mitad
+                            const absorbed = Math.min(targetSurvivor.armor, dmg * 0.5);
+                            targetSurvivor.armor -= absorbed;
+                            dmg -= absorbed;
+                        }
+                        targetSurvivor.health -= dmg;
                         z.attackCooldown = 1.2;
                         createBloodParticle(targetSurvivor.position);
 
@@ -519,6 +753,18 @@
                         updateUI();
                     }
                 } else {
+                    // Torre en el camino: la horda la golpea
+                    const tw = nearestTower(z.position, 3.5, false);
+                    if (tw && z.attackCooldown <= 0) {
+                        tw.health -= z.damage * 0.8;
+                        z.attackCooldown = 1.4;
+                        z.isMoving = false;
+                        aimTowards(z, tw.pos);
+                        createMuzzleFlash(tw.pos, 0x92400e, 0.08);
+                        if (tw.health <= 0) destroyTower(tw);
+                        animateEntityLimbs(z, delta);
+                        continue;
+                    }
                     const nearestShelterKey = getNearestActiveShelterKey(z.position);
                     if (!nearestShelterKey) { animateEntityLimbs(z, delta); continue; }
                     const targetZone = ZONES[nearestShelterKey];
@@ -545,10 +791,24 @@
 
         function updateDyingZombie(z, delta) {
             z.deathTimer += delta * gameSpeed;
+            // Fase 1: caida (0.45s)
             const t = Math.min(1, z.deathTimer / 0.45);
             z.mesh.rotation.x = t * (Math.PI / 2);
             z.mesh.position.y = -t * 0.15;
-            if (t >= 1) {
+            // Fase 2: cuerpo tendido 5s. Fase 3: quemado leve ~1.2s y desaparece
+            if (z.deathTimer > 5 && !z.burned) {
+                z.burned = true;
+                z.mesh.traverse(o => {
+                    if (o.isMesh && o.material && o.material.emissive) {
+                        o.material.emissive.setHex(0xcc3300);
+                        o.material.emissiveIntensity = 0.7;
+                    }
+                });
+            }
+            if (z.burned && z.deathTimer < 6.2 && Math.random() < 0.35) {
+                createFlamePuff(z.position);
+            }
+            if (z.deathTimer >= 6.2) {
                 scene.remove(z.mesh);
                 const idx = zombies.indexOf(z);
                 if (idx > -1) zombies.splice(idx, 1);
