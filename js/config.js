@@ -170,12 +170,39 @@
             if (c.kind === 'door') return !isSurvivor; // supervivientes pasan, zombies no
             return true;
         }
+        // Refugio que contiene al punto (interior libre para salir sin atascarse).
+        function shelterContaining(pos) {
+            if (!pos || typeof activeShelterKeys === 'undefined') return null;
+            for (const k of activeShelterKeys) {
+                const z = (typeof ZONES !== 'undefined') ? ZONES[k] : null;
+                if (!z || !z.intact || !z.pos) continue;
+                if (Math.hypot(pos.x - z.pos.x, pos.z - z.pos.z) < z.radius) return k;
+            }
+            return null;
+        }
         function resolveEntityCollisions(entity, isSurvivor) {
             if (!entity || !entity.position) return;
+            const insideKey = isSurvivor ? shelterContaining(entity.position) : null;
             for (const c of colliders) {
                 if (!isColliderSolidFor(c, isSurvivor)) continue;
                 if (c.ref && c.ref.health !== undefined && c.ref.health <= 0) continue;
                 if (c.ref && c.ref.hp !== undefined && c.ref.hp <= 0) continue;
+                // Interior del refugio: sin colisiones de su propio refugio para
+                // que los supervivientes salgan sin quedarse atascados.
+                if (isSurvivor && insideKey && (c.kind === 'wall' || c.kind === 'door' || c.kind === 'barricade' || c.kind === 'tower')) {
+                    const rk = c.ref ? (c.ref.shelterKey || c.ref.zoneKey) : null;
+                    if (rk === insideKey) continue;
+                    if (!rk && c.pos) {
+                        const z = (typeof ZONES !== 'undefined') ? ZONES[insideKey] : null;
+                        if (z && z.pos && Math.hypot(c.pos.x - z.pos.x, c.pos.z - z.pos.z) < z.radius + 12) continue;
+                    }
+                }
+                // Torres: al subir/construir se permite tocarlas (sin empuje).
+                if (isSurvivor && c.kind === 'tower' && c.ref) {
+                    if (entity.onTower === c.ref) continue;
+                    if (entity.towerSiteId && c.ref.id && entity.towerSiteId === c.ref.id) continue;
+                    if (entity.position.distanceTo && c.pos && entity.position.distanceTo(c.pos) < 3.5) continue;
+                }
                 const dx = entity.position.x - c.pos.x;
                 const dz = entity.position.z - c.pos.z;
                 const d = Math.hypot(dx, dz);
