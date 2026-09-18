@@ -51,15 +51,23 @@
                 [spawnList[i], spawnList[j]] = [spawnList[j], spawnList[i]];
             }
 
+            // Rodeo multidireccional: reparte la horda en grupos angulares
+            // uniformes por refugio para encerrar a los supervivientes.
+            const shelterList = activeShelterKeys.length ? activeShelterKeys.slice() : ['MALL'];
+            const numGroups = Math.max(4, Math.min(8, shelterList.length * 2));
             spawnList.forEach((typeKey, i) => {
-                const angle = Math.random() * Math.PI * 2;
+                const targetShelterKey = shelterList[i % shelterList.length];
+                const sz = ZONES[targetShelterKey] ? ZONES[targetShelterKey].pos : centroid;
+                const groupIdx = i % numGroups;
+                const baseAngle = (groupIdx / numGroups) * Math.PI * 2;
+                const angle = baseAngle + (Math.random() - 0.5) * 0.5;
                 const dist = 95 + Math.random() * 25;
-                const x = centroid.x + Math.cos(angle) * dist;
-                const z = centroid.z + Math.sin(angle) * dist;
+                const x = sz.x + Math.cos(angle) * dist;
+                const z = sz.z + Math.sin(angle) * dist;
 
                 setTimeout(() => {
                     createZombieEntity(x, z, typeKey);
-                }, (i * 90) / gameSpeed);
+                }, (i * 90) / Math.max(0.5, gameSpeed));
             });
         }
 
@@ -104,33 +112,86 @@
         }
 
         function pickFleeDestination(currentKey) {
+            // Compatibilidad: delega al destino grupal compartido.
+            const g = pickGroupFleeDestination();
+            return { pos: g.pos.clone(), zoneKey: g.zoneKey };
+        }
+
+        // Destino unico para todo el equipo: refugio mas seguro o salida
+        // conjunta lejos del centroide de la horda (evita dispersion).
+        function pickGroupFleeDestination() {
+            if (typeof groupFlee !== 'undefined' && groupFlee && groupFlee.pos) {
+                // Revalidar que siga siendo seguro; si no, recalcular abajo.
+                if (countNearbyZombies(groupFlee.pos, 16) < 6) return groupFlee;
+            }
+            // Centroide del equipo vivo
+            const team = new THREE.Vector3();
+            let tn = 0;
+            survivors.forEach(s => { if (s.health > 0) { team.add(s.position); tn++; } });
+            if (tn > 0) team.divideScalar(tn);
+            // Refugio activo mas seguro (vida - zombies*5)
             let bestKey = null;
             let bestScore = -Infinity;
             activeShelterKeys.forEach(k => {
-                if (k === currentKey) return;
                 const z = ZONES[k];
-                if (!z.intact) return;
-                const score = z.health - countNearbyZombies(z.pos, z.radius + 10) * 5;
+                if (!z || !z.intact) return;
+                const score = z.health - countNearbyZombies(z.pos, z.radius + 12) * 5;
                 if (score > bestScore) { bestScore = score; bestKey = k; }
             });
-            if (bestKey) return { pos: ZONES[bestKey].pos.clone(), zoneKey: bestKey };
-
-            // No hay otro refugio disponible: huir a campo abierto, lejos de la horda
-            const homePos = ZONES[currentKey] ? ZONES[currentKey].pos : new THREE.Vector3();
-            let avg = new THREE.Vector3();
-            let cnt = 0;
+            if (bestKey && countNearbyZombies(ZONES[bestKey].pos, ZONES[bestKey].radius + 12) < 8) {
+                groupFlee = { pos: ZONES[bestKey].pos.clone(), zoneKey: bestKey };
+                return groupFlee;
+            }
+            // Salida conjunta: direccion opuesta al centroide zombie
+            let zAvg = new THREE.Vector3();
+            let zc = 0;
             zombies.forEach(z => {
-                if (z.health > 0 && !z.dying && homePos.distanceTo(z.position) < 45) { avg.add(z.position); cnt++; }
+                if (z.health > 0 && !z.dying && team.distanceTo(z.position) < 55) { zAvg.add(z.position); zc++; }
             });
             let awayDir = new THREE.Vector3(1, 0, 0.3);
-            if (cnt > 0) {
-                avg.divideScalar(cnt);
-                awayDir.subVectors(homePos, avg);
+            if (zc > 0) {
+                zAvg.divideScalar(zc);
+                awayDir.subVectors(team, zAvg);
                 if (awayDir.lengthSq() < 0.01) awayDir.set(1, 0, 0);
                 awayDir.normalize();
             }
-            const fleePos = homePos.clone().addScaledVector(awayDir, 32);
-            return { pos: fleePos, zoneKey: null };
+            const fleePos = team.clone().addScaledVector(awayDir, 34);
+            groupFlee = { pos: fleePos, zoneKey: null };
+            return groupFlee;
+        }
+
+        // Movimiento de huida con repulsion: no tocar infectados ni dejarse rodear.
+        function moveFleeing(s, targetPos, baseSpeed) {
+            const dir = new THREE.Vector3().subVectors(targetPos, s.position);
+            dir.y = 0;
+            if (dir.length() > 0.01) dir.normalize();
+            // Repulsion de zombies cercanos (<9u): prioriza la vida sobre la ruta.
+            const repel = new THREE.Vector3();
+            zombies.forEach(z => {
+                if (z.health <= 0 || z.dying) return;
+                const d = s.position.distanceTo(z.position);
+                if (d < 9) {
+                    const away = new THREE.Vector3().subVectors(s.position, z.position);
+                    away.y = 0;
+                    const w = (9 - d) / 9; // mas cerca = mas empuje
+                    away.normalize().multiplyScalar(w * 1.6);
+                    repel.add(away);
+                }
+            });
+            dir.add(repel);
+            if (dir.lengthSq() < 0.001) dir.set(1, 0, 0);
+            dir.normalize();
+            // Formacion: offset por id para no apilarse y cubrirse entre si.
+            const fx = Math.cos(s.id * 2.4) * 2.2;
+            const fz = Math.sin(s.id * 2.4) * 2.2;
+            const finalTarget = targetPos.clone().add(new THREE.Vector3(fx, 0, fz));
+            const toFinal = new THREE.Vector3().subVectors(finalTarget, s.position);
+            toFinal.y = 0;
+            // Si hay repulsion fuerte, moverse en la direccion segura directamente.
+            const useDir = repel.length() > 0.7 ? dir : toFinal.normalize();
+            s.position.addScaledVector(useDir, baseSpeed * gameSpeed);
+            aimTowards(s, s.position.clone().add(useDir));
+            s.isMoving = true;
         }
 
         function updateSurvivorAI(delta) {
@@ -176,16 +237,20 @@
 
                 const wconf = WEAPONS[s.primary] || WEAPONS.PISTOL;
                 const effRange = wconf.range * (s.onTower ? 1.3 : 1); // bonus de altura
-                if (nearestZombie && minDist < effRange && s.aiState !== 'FLEE') {
+                // En huida tambien disparan cubriendose entre si (proteccion mutua),
+                // pero priorizan moverse: el disparo no detiene la huida.
+                if (nearestZombie && minDist < effRange) {
                     aimTowards(s, nearestZombie.position);
-                    // Granada si hay grupo compacto y tiene stock
-                    if (s.grenades > 0 && s.grenadeCooldown <= 0 && minDist < 16 && countNearbyZombies(nearestZombie.position, 6) >= 3) {
+                    // Granada si hay grupo compacto y tiene stock (no en huida: prioriza correr)
+                    if (s.aiState !== 'FLEE' && s.grenades > 0 && s.grenadeCooldown <= 0 && minDist < 16 && countNearbyZombies(nearestZombie.position, 6) >= 3) {
                         throwGrenade(s, nearestZombie.position);
                         s.thoughtText = `¡Granada fuera! (${s.grenades} restantes)`;
                     } else if (s.shootCooldown <= 0 && s.ammo > 0) {
                         fireSurvivorWeapon(s, nearestZombie);
                     }
                 }
+                // Solicitudes automaticas del equipo ("El superviviente necesita...")
+                if (typeof updateSurvivorRequests === 'function') updateSurvivorRequests(s, nearestZombie, minDist);
 
                 // PRIORIDAD 1 (global): curar aliados heridos con botiquin
                 // (los francotiradores en torre no abandonan su puesto para curar)
@@ -197,33 +262,63 @@
                     const nearbyZ = countNearbyZombies(homeZone.pos, homeZone.radius + 14);
                     const garrisonAlive = Math.max(1, countAliveGarrison(s.homeZoneKey));
 
-                    // Decisión de huida: si la horda supera ampliamente a la guarnición local
+                    // Decisión de huida EN EQUIPO: si la horda supera a la guarnicion,
+                    // todo el grupo huye junto al mismo destino (no dispersion).
                     if (s.aiState !== 'FLEE' && nearbyZ >= 5 && nearbyZ > garrisonAlive * 2.6) {
-                        s.aiState = 'FLEE';
-                        const dest = pickFleeDestination(s.homeZoneKey);
-                        s.fleeTarget = dest.pos;
-                        s.fleeZoneKey = dest.zoneKey;
-                        addLogEvent(`${s.name} se repliega: superado en número en ${homeZone.name}.`);
+                        const dest = pickGroupFleeDestination();
+                        survivors.forEach(o => {
+                            if (o.health <= 0) return;
+                            if (o.aiState !== 'FLEE') {
+                                o.aiState = 'FLEE';
+                                o.fleeTarget = dest.pos;
+                                o.fleeZoneKey = dest.zoneKey;
+                            }
+                        });
+                        groupFlee = dest;
+                        addLogEvent(`¡Repliegue en equipo! El grupo se retira junto desde ${homeZone.name}, cubriéndose entre sí.`);
                     }
 
                     if (s.aiState === 'FLEE') {
                         if (s.onTower) dismountTower(s); // abandona la torre para huir
-                        s.thoughtText = '¡Replegándonos, nos superan en número!';
-                        moveTowards(s, s.fleeTarget, 0.155);
-                        const arrived = s.position.distanceTo(s.fleeTarget) < 3;
+                        // Destino compartido: si no tiene, usa el grupal.
+                        if ((!s.fleeTarget || !s.fleeZoneKey) && typeof groupFlee !== 'undefined' && groupFlee) {
+                            s.fleeTarget = groupFlee.pos;
+                            s.fleeZoneKey = groupFlee.zoneKey;
+                        }
+                        if (!s.fleeTarget) {
+                            const dest = pickGroupFleeDestination();
+                            s.fleeTarget = dest.pos;
+                            s.fleeZoneKey = dest.zoneKey;
+                        }
+                        s.thoughtText = '¡Replegándonos juntos, cubranse!';
+                        moveFleeing(s, s.fleeTarget, 0.165);
+                        const arrived = s.position.distanceTo(s.fleeTarget) < 4;
                         const stillNearbyThreat = countNearbyZombies(s.position, 14) >= 4;
 
                         if (arrived) {
                             if (s.fleeZoneKey) {
                                 s.homeZoneKey = s.fleeZoneKey;
-                                s.aiState = 'DEFEND_BASE';
+                                // Solo vuelve a defender cuando TODO el equipo llego.
+                                const teamArrived = survivors.every(o => o.health <= 0 || o.aiState !== 'FLEE' || o.position.distanceTo(o.fleeTarget || s.fleeTarget) < 6);
+                                if (teamArrived) {
+                                    survivors.forEach(o => { if (o.health > 0 && o.aiState === 'FLEE') o.aiState = 'DEFEND_BASE'; });
+                                    groupFlee = null;
+                                }
                             } else if (!stillNearbyThreat) {
-                                s.aiState = 'DEFEND_BASE';
+                                const teamSafe = survivors.every(o => o.health <= 0 || o.aiState !== 'FLEE' || countNearbyZombies(o.position, 14) < 4);
+                                if (teamSafe) {
+                                    survivors.forEach(o => { if (o.health > 0 && o.aiState === 'FLEE') o.aiState = 'DEFEND_BASE'; });
+                                    groupFlee = null;
+                                }
                             } else {
-                                // Sigue amenazado en campo abierto: re-evaluar destino
-                                const dest = pickFleeDestination(s.homeZoneKey);
-                                s.fleeTarget = dest.pos;
-                                s.fleeZoneKey = dest.zoneKey;
+                                // Sigue amenazado: todo el equipo re-evalua junto un nuevo destino.
+                                const dest = pickGroupFleeDestination();
+                                survivors.forEach(o => {
+                                    if (o.health > 0 && o.aiState === 'FLEE') {
+                                        o.fleeTarget = dest.pos;
+                                        o.fleeZoneKey = dest.zoneKey;
+                                    }
+                                });
                             }
                         }
                     } else if (!healBusy) {
@@ -260,35 +355,59 @@
                             moveTowards(s, homeZone.pos, 0.1);
                         }
                     } else {
-                        if (!s.targetCrate || s.targetCrate.isPickedUp) {
-                            s.targetCrate = findClosestAvailableCrate(s.position);
-                        }
-
-                        if (s.targetCrate) {
-                            s.thoughtText = `Recolectando ${s.targetCrate.config.name}`;
-                            const distToCrate = s.position.distanceTo(s.targetCrate.position);
-
-                            if (distToCrate < 1.5) {
-                                pickupCrate(s, s.targetCrate);
-                            } else {
-                                moveTowards(s, s.targetCrate.position, 0.11);
-                            }
+                        // TAREA GRUPAL: si hay obra colectiva activa, todos la
+                        // terminan juntos antes de empezar otra (no multitarea).
+                        const directive = getGroupDirective();
+                        if (directive && directive.kind === 'repair') {
+                            updateShelterRepair(s, delta);
+                        } else if (directive && directive.kind === 'found') {
+                            updateShelterFound(s, delta);
+                        } else if (directive && directive.kind === 'tower') {
+                            updateTowerWork(s, delta, homeZone);
                         } else {
-                            // Sin cajas: reparar, fundar refugio, barricada y al ultimo la torre
-                            if (maybeCraftSupplyCrate(s)) {
-                                // fabricada este frame
-                            } else if (updateShelterRepair(s, delta)) {
-                                // reconstruyendo refugio este frame
-                            } else if (updateShelterFound(s, delta)) {
-                                // levantando nuevo refugio este frame
-                            } else if (updateSurvivorBuild(s, delta, homeZone)) {
-                                // construyendo barricada este frame
-                            } else if (updateTowerWork(s, delta, homeZone)) {
-                                // trabajando en la torre este frame
+                            // Sin obra grupal: cada quien su propia caja (reserva exclusiva).
+                            if (!s.targetCrate || s.targetCrate.isPickedUp || isCrateClaimed(s.targetCrate, s)) {
+                                s.targetCrate = findClosestAvailableCrate(s.position, s);
+                                // Si no hay caja libre, reclamar loot exclusivo.
+                                if (!s.targetCrate) {
+                                    if (!s.targetLoot || !loots.includes(s.targetLoot) || isLootClaimed(s.targetLoot, s)) {
+                                        s.targetLoot = findClosestAvailableLoot(s.position, s);
+                                    }
+                                } else {
+                                    s.targetLoot = null;
+                                }
+                            }
+
+                            if (s.targetCrate) {
+                                s.thoughtText = `Recolectando ${s.targetCrate.config.name}`;
+                                const distToCrate = s.position.distanceTo(s.targetCrate.position);
+
+                                if (distToCrate < 1.5) {
+                                    pickupCrate(s, s.targetCrate);
+                                    s.targetCrate = null;
+                                } else {
+                                    moveTowards(s, s.targetCrate.position, 0.11);
+                                }
+                            } else if (s.targetLoot && loots.includes(s.targetLoot)) {
+                                s.thoughtText = `Recogiendo suministro...`;
+                                const dL = s.position.distanceTo(s.targetLoot.position);
+                                if (dL < 1.6) {
+                                    collectLoot(s, s.targetLoot);
+                                    s.targetLoot = null;
+                                } else {
+                                    moveTowards(s, s.targetLoot.position, 0.11);
+                                }
                             } else {
-                                s.thoughtText = "Patrullando perímetro...";
-                                const patrolPos = homeZone.pos.clone().add(new THREE.Vector3(Math.cos(s.id + clock.getElapsedTime() * 0.5) * 10, 0, Math.sin(s.id + clock.getElapsedTime() * 0.5) * 10));
-                                moveTowards(s, patrolPos, 0.08);
+                                // Sin cajas ni loot: barricada individual y patrulla.
+                                if (maybeCraftSupplyCrate(s)) {
+                                    // fabricada este frame
+                                } else if (updateSurvivorBuild(s, delta, homeZone)) {
+                                    // construyendo barricada este frame
+                                } else {
+                                    s.thoughtText = "Patrullando perímetro...";
+                                    const patrolPos = homeZone.pos.clone().add(new THREE.Vector3(Math.cos(s.id + clock.getElapsedTime() * 0.5) * 10, 0, Math.sin(s.id + clock.getElapsedTime() * 0.5) * 10));
+                                    moveTowards(s, patrolPos, 0.08);
+                                }
                             }
                         }
                     }
@@ -393,16 +512,89 @@
             }
         }
 
-        function findClosestAvailableCrate(pos) {
+        // Reserva exclusiva: si un superviviente ya va por una caja/loot,
+        // los demas eligen otro objetivo (uno por caja).
+        function isCrateClaimed(crate, self) {
+            return survivors.some(o => o !== self && o.health > 0 && o.targetCrate === crate);
+        }
+
+        function isLootClaimed(loot, self) {
+            return survivors.some(o => o !== self && o.health > 0 && o.targetLoot === loot);
+        }
+
+        function findClosestAvailableCrate(pos, self) {
             let closest = null;
             let minDist = 999;
             crates.forEach(c => {
-                if (!c.isPickedUp) {
-                    const d = pos.distanceTo(c.position);
-                    if (d < minDist) { minDist = d; closest = c; }
-                }
+                if (c.isPickedUp) return;
+                if (self && isCrateClaimed(c, self)) return; // ya la persigue otro
+                const d = pos.distanceTo(c.position);
+                if (d < minDist) { minDist = d; closest = c; }
             });
             return closest;
+        }
+
+        function findClosestAvailableLoot(pos, self) {
+            let closest = null;
+            let minDist = 999;
+            loots.forEach(l => {
+                if (self && isLootClaimed(l, self)) return;
+                const d = pos.distanceTo(l.position);
+                if (d < minDist) { minDist = d; closest = l; }
+            });
+            return closest;
+        }
+
+        // ==========================================================
+        // TAREA GRUPAL: todos terminan la misma obra antes de otra.
+        // Prioridad: reparar > fundar refugio > construir torre.
+        // ==========================================================
+        function getGroupDirective() {
+            if (isWaveActive) return null;
+            if (typeof groupTask !== 'undefined' && groupTask) {
+                if (groupTask.kind === 'repair') {
+                    const t = (typeof mostDamagedShelter === 'function') ? mostDamagedShelter() : null;
+                    if (!t || t.key !== groupTask.key) groupTask = null;
+                    else return groupTask;
+                } else if (groupTask.kind === 'found') {
+                    if (typeof shelterFounder === 'undefined' || !shelterFounder) groupTask = null;
+                    else return groupTask;
+                } else if (groupTask.kind === 'tower') {
+                    const site = towers.find(t => !t.complete && t.id === groupTask.siteId);
+                    if (!site) groupTask = null;
+                    else return groupTask;
+                } else {
+                    groupTask = null;
+                }
+            }
+            if (typeof mostDamagedShelter === 'function' && mostDamagedShelter()) {
+                const t = mostDamagedShelter();
+                groupTask = { kind: 'repair', key: t.key };
+                return groupTask;
+            }
+            if (typeof shelterFounder !== 'undefined' && shelterFounder) {
+                groupTask = { kind: 'found', key: shelterFounder.zoneKey };
+                return groupTask;
+            }
+            // Fundacion pendiente por recursos: agrupar para fundar juntos.
+            const aliveN = survivors.filter(o => o.health > 0).length;
+            if (aliveN >= 3 && activeShelterKeys.length < 4 &&
+                baseResources.ammo >= SHELTER_FOUND_COST.ammo && baseResources.food >= SHELTER_FOUND_COST.food &&
+                Object.keys(ZONES).some(k => !ZONES[k].isActiveShelter && ZONES[k].intact)) {
+                groupTask = { kind: 'found', key: null };
+                return groupTask;
+            }
+            // Torres ilimitadas: una sola obra activa, todo el equipo a la misma.
+            let site = towers.find(t => !t.complete) || null;
+            if (site) {
+                groupTask = { kind: 'tower', siteId: site.id, key: site.zoneKey };
+                return groupTask;
+            }
+            if (baseResources.ammo >= 1) {
+                groupTask = { kind: 'tower', siteId: null, key: null };
+                return groupTask;
+            }
+            return null;
         }
 
         function pickupCrate(survivor, crate) {
@@ -635,16 +827,16 @@
             s.position.x += 3;
         }
 
-        // Fuera de oleada y sin nada que hacer: aportar 1s por segundo a la obra.
-        // Las torres son obra del refugio PRINCIPAL.
+        // Fuera de oleada: TORRES ILIMITADAS, una sola obra activa y todo el
+        // equipo trabaja en la misma hasta terminarla (tarea grupal).
         function updateTowerWork(s, delta, homeZone) {
             if (isWaveActive) return false;
             const mainZone = (ZONES[mainShelterKey] && ZONES[mainShelterKey].isActiveShelter) ? ZONES[mainShelterKey] : homeZone;
             const mainKey = mainZone.key;
-            if (countCompleteTowers() + (findTowerSite() ? 1 : 0) >= TOWER_MAX && !findTowerSite()) return false;
-            let site = towers.find(t => !t.complete && t.id === s.towerSiteId) || findTowerSite();
+            // Sin tope: solo una obra incompleta a la vez para trabajo conjunto.
+            let site = findTowerSite();
+            if (site && s.towerSiteId && s.towerSiteId !== site.id) s.towerSiteId = site.id;
             if (!site) {
-                if (countCompleteTowers() >= TOWER_MAX) return false;
                 // Fundar obra junto al refugio principal (requiere 1 de municion como materiales)
                 if (baseResources.ammo < 1) return false;
                 const ang = Math.random() * Math.PI * 2;
@@ -668,6 +860,7 @@
             if (site.progress >= TOWER_WORK_REQUIRED) {
                 finishTower(site);
                 survivors.forEach(o => { if (o.towerSiteId === site.id) o.towerSiteId = null; });
+                if (typeof groupTask !== 'undefined' && groupTask && groupTask.kind === 'tower') groupTask = null;
             }
             return true;
         }
@@ -896,6 +1089,8 @@
                     continue;
                 }
 
+                // PRIORIDAD: primero destruir el refugio, luego a los supervivientes.
+                // Solo se desvia a un superviviente si esta a contacto (<6u).
                 let targetSurvivor = null;
                 let minDist = 999;
 
@@ -906,7 +1101,8 @@
                     }
                 });
 
-                if (targetSurvivor && minDist < 15) {
+                // Contacto cercano: defensa propia contra el superviviente.
+                if (targetSurvivor && minDist < 6) {
                     moveTowards(z, targetSurvivor.position, z.speed);
 
                     if (minDist < 1.5 && z.attackCooldown <= 0) {
@@ -923,6 +1119,7 @@
                         if (targetSurvivor.health <= 0) {
                             targetSurvivor.health = 0;
                             addLogEvent(`¡${targetSurvivor.name} ha caído en combate!`);
+                            if (typeof updateReinforceButton === 'function') updateReinforceButton();
                         }
                         updateUI();
                     }
@@ -940,20 +1137,25 @@
                         continue;
                     }
                     const nearestShelterKey = getNearestActiveShelterKey(z.position);
-                    if (!nearestShelterKey) { animateEntityLimbs(z, delta); continue; }
-                    const targetZone = ZONES[nearestShelterKey];
+                    if (!nearestShelterKey) {
+                        // Sin refugio: ahora si persigue supervivientes.
+                        if (targetSurvivor) moveTowards(z, targetSurvivor.position, z.speed);
+                        else { animateEntityLimbs(z, delta); continue; }
+                    } else {
+                        const targetZone = ZONES[nearestShelterKey];
 
-                    moveTowards(z, targetZone.pos, z.speed);
-                    const distToBase = z.position.distanceTo(targetZone.pos);
+                        moveTowards(z, targetZone.pos, z.speed);
+                        const distToBase = z.position.distanceTo(targetZone.pos);
 
-                    if (distToBase < targetZone.radius && z.attackCooldown <= 0) {
-                        targetZone.health = Math.max(0, targetZone.health - 1.5);
-                        z.attackCooldown = 1.5;
+                        if (distToBase < targetZone.radius && z.attackCooldown <= 0) {
+                            targetZone.health = Math.max(0, targetZone.health - 1.5);
+                            z.attackCooldown = 1.5;
 
-                        if (targetZone.health <= 0) {
-                            overrunShelter(nearestShelterKey);
+                            if (targetZone.health <= 0) {
+                                overrunShelter(nearestShelterKey);
+                            }
+                            updateUI();
                         }
-                        updateUI();
                     }
                 }
 
