@@ -14,8 +14,10 @@
 
         function getWaveTypeMix(wave) {
             const total = getWaveZombieCount(wave);
+            const aliveSurvivors = survivors.filter(s => s.health > 0).length;
+            const extraLarge = Math.max(0, aliveSurvivors - 5) * 0.02; // mas supervivientes = mas titanes
             let mediumRatio = Math.min(0.5, 0.04 + wave * 0.035);
-            let largeRatio = Math.min(0.3, Math.max(0, (wave - 1) * 0.028));
+            let largeRatio = Math.min(0.45, Math.max(0, (wave - 1) * 0.028) + extraLarge);
             let basicRatio = Math.max(0.12, 1 - mediumRatio - largeRatio);
             const sum = basicRatio + mediumRatio + largeRatio;
             basicRatio /= sum; mediumRatio /= sum; largeRatio /= sum;
@@ -189,7 +191,10 @@
             toFinal.y = 0;
             // Si hay repulsion fuerte, moverse en la direccion segura directamente.
             const useDir = repel.length() > 0.7 ? dir : toFinal.normalize();
-            s.position.addScaledVector(useDir, baseSpeed * gameSpeed);
+            const step = baseSpeed * gameSpeed;
+            const tmpTarget = s.position.clone().addScaledVector(useDir, 2);
+            if (typeof tryMoveWithCollisions === 'function') tryMoveWithCollisions(s, tmpTarget, step, true);
+            else s.position.addScaledVector(useDir, step);
             aimTowards(s, s.position.clone().add(useDir));
             s.isMoving = true;
         }
@@ -498,13 +503,41 @@
             const dir = new THREE.Vector3().subVectors(targetPos, entity.position);
             dir.y = 0;
             if (dir.length() > 0.15) {
-                dir.normalize();
-                entity.position.addScaledVector(dir, speed * gameSpeed);
+                const isSurvivor = !entity.typeKey; // zombies tienen typeKey
+                const step = speed * gameSpeed;
+                if (typeof tryMoveWithCollisions === 'function') {
+                    tryMoveWithCollisions(entity, targetPos, step, isSurvivor);
+                    // Zombies destruyen entorno destructible que bloquee el paso.
+                    if (!isSurvivor && typeof damageBlockingEnv === 'function') damageBlockingEnv(entity);
+                } else {
+                    dir.normalize();
+                    entity.position.addScaledVector(dir, step);
+                }
                 aimTowards(entity, targetPos);
                 entity.isMoving = true;
             } else {
                 entity.isMoving = false;
             }
+        }
+        // Si un zombie choca con entorno destructible, lo golpea para abrir paso.
+        function damageBlockingEnv(z) {
+            if (!z || z.attackCooldown > 0) return false;
+            for (const c of colliders) {
+                if (c.kind !== 'env' || !c.destructible) continue;
+                const d = Math.hypot(z.position.x - c.pos.x, z.position.z - c.pos.z);
+                if (d < c.radius + 1.2) {
+                    c.ref.hp -= z.damage * 0.5;
+                    z.attackCooldown = 1.2;
+                    z.isMoving = false;
+                    if (c.ref.hp <= 0 && c.ref.mesh) {
+                        scene.remove(c.ref.mesh);
+                        unregisterColliderForRef(c.ref);
+                        addLogEvent('La horda destruyó un obstáculo del entorno para abrirse paso.');
+                    }
+                    return true;
+                }
+            }
+            return false;
         }
 
         function aimTowards(entity, targetPos) {
@@ -682,7 +715,7 @@
                 return groupTask;
             }
 
-            // PASO 5 y 7: torres (primera y luego ilimitadas, una obra a la vez).
+            // PASO 5 y 7: 3 torres por refugio (6 si es custom: 3 techo + 3 fuera).
             const site = towers.find(t => !t.complete) || null;
             if (site) {
                 groupTask = { kind: 'tower', siteId: site.id, key: site.zoneKey };
@@ -690,8 +723,15 @@
                 return groupTask;
             }
             const completeN = towers.filter(t => t.complete).length;
-            if (baseResources.ammo >= 1) {
-                groupTask = { kind: 'tower', siteId: null, key: null };
+            // Buscar refugio con cupo libre (respeta limite por refugio).
+            const shelterWithSlot = activeShelterKeys.find(k => {
+                if (typeof countTowersForShelter === 'function' && typeof towerLimitForShelter === 'function') {
+                    return countTowersForShelter(k) < towerLimitForShelter(k);
+                }
+                return true;
+            });
+            if (shelterWithSlot && baseResources.ammo >= 1) {
+                groupTask = { kind: 'tower', siteId: null, key: shelterWithSlot };
                 setOrderPhase(completeN < 1 ? 'FIRST-TOWER' : 'MORE-TOWERS');
                 return groupTask;
             }
@@ -970,17 +1010,37 @@
         // equipo trabaja en la misma hasta terminarla (tarea grupal).
         function updateTowerWork(s, delta, homeZone) {
             if (isWaveActive) return false;
-            const mainZone = (ZONES[mainShelterKey] && ZONES[mainShelterKey].isActiveShelter) ? ZONES[mainShelterKey] : homeZone;
-            const mainKey = mainZone.key;
-            // Sin tope: solo una obra incompleta a la vez para trabajo conjunto.
+            // Solo una obra incompleta a la vez; respeta cupo 3/refugio (6 custom).
             let site = findTowerSite();
             if (site && s.towerSiteId && s.towerSiteId !== site.id) s.towerSiteId = site.id;
             if (!site) {
-                // Fundar obra junto al refugio principal (requiere 1 de municion como materiales)
-                if (baseResources.ammo < 1) return false;
-                const ang = Math.random() * Math.PI * 2;
-                const r = mainZone.radius + 10;
-                site = createTowerSite(mainKey, mainZone.pos.x + Math.cos(ang) * r, mainZone.pos.z + Math.sin(ang) * r);
+                if (baseResources.ammo < 1) {
+                    if (typeof requestSupplyHelp === 'function') requestSupplyHelp('munición para torres');
+                    return false;
+                }
+                // Elegir refugio con cupo: groupTask.key o el primero con hueco.
+                let targetKey = (typeof groupTask !== 'undefined' && groupTask && groupTask.kind === 'tower' && groupTask.key) ? groupTask.key : null;
+                if (!targetKey || countTowersForShelter(targetKey) >= towerLimitForShelter(targetKey)) {
+                    targetKey = activeShelterKeys.find(k => countTowersForShelter(k) < towerLimitForShelter(k)) || null;
+                }
+                if (!targetKey) return false; // todos los refugios al tope
+                const tZone = ZONES[targetKey];
+                const isCustom = !!(typeof customShelters !== 'undefined' && customShelters[targetKey]);
+                const roofCount = countRoofTowers(targetKey);
+                let wx, wz, roof = false;
+                // Custom: 3 en techo + 3 fuera. Primeras 3 van al techo.
+                if (isCustom && roofCount < 3) {
+                    roof = true;
+                    const ang = (roofCount / 3) * Math.PI * 2;
+                    wx = tZone.pos.x + Math.cos(ang) * 4;
+                    wz = tZone.pos.z + Math.sin(ang) * 4;
+                } else {
+                    const ang = Math.random() * Math.PI * 2;
+                    const r = tZone.radius + 10;
+                    wx = tZone.pos.x + Math.cos(ang) * r;
+                    wz = tZone.pos.z + Math.sin(ang) * r;
+                }
+                site = createTowerSite(targetKey, wx, wz, roof);
                 baseResources.ammo = Math.max(0, baseResources.ammo - 1);
             }
             s.towerSiteId = site.id;
@@ -1007,17 +1067,29 @@
         // ==========================================================
         // FUNDAR NUEVOS REFUGIOS (casa de 4 muros con puertas/ventanas)
         // ==========================================================
+        function expectedWallSegments(key) {
+            const lv = (typeof shelterLevels !== 'undefined' && shelterLevels[key]) || 2;
+            return lv >= 3 ? 12 : 8; // 8 segmentos + 4 refuerzo en fortaleza
+        }
         function mostDamagedShelter() {
             let best = null;
             activeShelterKeys.forEach(k => {
                 const z = ZONES[k];
                 let score = (100 - z.health) / 100;
+                const expected = expectedWallSegments(k);
                 const totalWalls = walls.filter(w => w.shelterKey === k).length;
-                if (totalWalls > 0) {
-                    score += (totalWalls - shelterWallCount(k)) / totalWalls;
+                const hasHouse = totalWalls > 0 || (typeof shelterLevels !== 'undefined' && shelterLevels[k]);
+                if (hasHouse) {
+                    score += Math.max(0, (expected - totalWalls)) / expected;
                     walls.forEach(w => {
                         if (w.shelterKey === k) score += (w.maxHealth - Math.max(0, w.health)) / w.maxHealth * 0.25;
                     });
+                    // Puertas dañadas tambien ponderan.
+                    if (typeof doors !== 'undefined') {
+                        doors.forEach(d => {
+                            if (d.shelterKey === k) score += (d.maxHealth - Math.max(0, d.health)) / d.maxHealth * 0.2;
+                        });
+                    }
                 }
                 if (score > 0.02 && (!best || score > best.score)) best = { key: k, zone: z, score: score };
             });
@@ -1057,9 +1129,10 @@
             if (target.zone.health < 100) {
                 target.zone.health = Math.min(100, target.zone.health + 4 * delta * gameSpeed);
             }
-            // Reparar muros dañados y re-levantar caidos (6s por muro, solo si la casa existe)
+            // Reparar muros/puertas y re-levantar caidos (6s por segmento).
+            const expected = expectedWallSegments(target.key);
             const existingWalls = walls.filter(w => w.shelterKey === target.key).length;
-            const deadSides = existingWalls > 0 ? 4 - existingWalls : 0;
+            const deadSides = Math.max(0, expected - existingWalls - 4); // 4 huecos son puertas
             let repaired = false;
             walls.forEach(w => {
                 if (w.shelterKey === target.key && w.health < w.maxHealth) {
@@ -1067,12 +1140,41 @@
                     repaired = true;
                 }
             });
-            if (!repaired && deadSides > 0) {
+            if (typeof doors !== 'undefined') {
+                doors.forEach(d => {
+                    if (d.shelterKey === target.key && d.health < d.maxHealth) {
+                        d.health = Math.min(d.maxHealth, d.health + 12 * delta * gameSpeed);
+                        repaired = true;
+                    }
+                });
+            }
+            // Si falta puerta, reconstruirla primero (acceso propio).
+            const expectedDoors = 4;
+            const existingDoors = (typeof doors !== 'undefined') ? doors.filter(d => d.shelterKey === target.key).length : 4;
+            if (!repaired && existingDoors < expectedDoors) {
+                s.repairWallTimer = (s.repairWallTimer || 0) + delta * gameSpeed;
+                if (s.repairWallTimer >= 4) {
+                    s.repairWallTimer = 0;
+                    if (typeof rebuildShelterDoor === 'function') rebuildShelterDoor(target.key);
+                    else rebuildShelterWall(target.key);
+                    addLogEvent(`${s.name} colocó puerta en ${target.zone.name} (solo supervivientes).`);
+                }
+            } else if (!repaired && deadSides > 0) {
                 s.repairWallTimer = (s.repairWallTimer || 0) + delta * gameSpeed;
                 if (s.repairWallTimer >= 6) {
                     s.repairWallTimer = 0;
                     rebuildShelterWall(target.key);
                     addLogEvent(`${s.name} re-levanto un muro en ${target.zone.name}.`);
+                }
+            }
+            // Al 100% y con materiales de sobra: subir a fortaleza (mini->casa->fortaleza).
+            if (shelterRepairPct(target.key) >= 100) {
+                const lv = (typeof shelterLevels !== 'undefined' && shelterLevels[target.key]) || 2;
+                if (lv < 3 && baseResources.ammo >= 1 && baseResources.food >= 1) {
+                    baseResources.ammo -= 1; baseResources.food -= 1;
+                    if (typeof upgradeShelterLevel === 'function') upgradeShelterLevel(target.key);
+                    if (typeof groupTask !== 'undefined' && groupTask && groupTask.kind === 'repair') groupTask = null;
+                    return true;
                 }
             }
             const pct = shelterRepairPct(target.key);
@@ -1088,30 +1190,44 @@
         function shelterRepairPct(key) {
             const z = ZONES[key];
             const total = walls.filter(w => w.shelterKey === key);
+            const expected = (typeof expectedWallSegments === 'function') ? expectedWallSegments(key) : 8;
             let sum = z.health;
-            let max = 100;
-            total.forEach(w => { sum += Math.max(0, w.health); max += w.maxHealth; });
-            // Muros faltantes cuentan como 0 (solo en casas fundadas)
-            if (total.length > 0) max += (4 - total.length) * WALL_HP;
+            let max = 100 + expected * WALL_HP;
+            total.forEach(w => { sum += Math.max(0, w.health); });
+            if (typeof doors !== 'undefined') {
+                doors.filter(d => d.shelterKey === key).forEach(d => { sum += Math.max(0, d.health) * 0.5; max += d.maxHealth * 0.5; });
+            }
             return Math.round(sum / Math.max(1, max) * 100);
+        }
+        function rebuildShelterDoor(zoneKey) {
+            const zone = ZONES[zoneKey];
+            const H = 7;
+            const existing = (typeof doors !== 'undefined') ? doors.filter(d => d.shelterKey === zoneKey).length : 0;
+            const sideIdx = existing % 4;
+            const offs = [{ x: 0, z: -H, ry: 0 }, { x: 0, z: H, ry: 0 }, { x: -H, z: 0, ry: Math.PI / 2 }, { x: H, z: 0, ry: Math.PI / 2 }];
+            const sd = offs[sideIdx];
+            if (typeof createSurvivorDoor === 'function') createSurvivorDoor(zoneKey, zone.pos.x + sd.x, zone.pos.z + sd.z, sd.ry);
+            updateUI();
         }
 
         function rebuildShelterWall(zoneKey) {
             const zone = ZONES[zoneKey];
             const H = 7;
-            const existing = walls.filter(w => w.shelterKey === zoneKey).length;
-            // Re-crea el lado faltante rotando segun cuantos haya
-            const sideIdx = existing % 4;
-            const ang = sideIdx * Math.PI / 2;
-            const wx = zone.pos.x + Math.cos(ang) * H;
-            const wz = zone.pos.z + Math.sin(ang) * H;
-            const wall = new THREE.Mesh(new THREE.BoxGeometry(12, 2.6, 0.5),
+            // Reconstruye un segmento de 5m junto a una puerta (no tapa accesos).
+            const wall = new THREE.Mesh(new THREE.BoxGeometry(5, 2.6, 0.5),
                 new THREE.MeshStandardMaterial({ color: 0xcbd5e1, roughness: 0.8 }));
-            wall.position.set(wx, 1.3, wz);
-            wall.rotation.y = (sideIdx % 2 === 0) ? 0 : Math.PI / 2;
+            const sideIdx = walls.filter(w => w.shelterKey === zoneKey).length % 4;
+            const offs = [{ x: 0, z: -H, ry: 0 }, { x: 0, z: H, ry: 0 }, { x: -H, z: 0, ry: Math.PI / 2 }, { x: H, z: 0, ry: Math.PI / 2 }];
+            const sd = offs[sideIdx];
+            const along = (sideIdx % 2 === 0) ? 3.5 : 0;
+            const across = (sideIdx % 2 === 0) ? 0 : 3.5;
+            wall.position.set(zone.pos.x + sd.x + (sd.ry === 0 ? along : across * 0), 1.3, zone.pos.z + sd.z + (sd.ry === 0 ? 0 : along));
+            wall.rotation.y = sd.ry;
             wall.castShadow = true;
             scene.add(wall);
-            walls.push({ mesh: wall, health: WALL_HP * 0.5, maxHealth: WALL_HP, position: wall.position, shelterKey: zoneKey });
+            const rec = { mesh: wall, health: WALL_HP * 0.5, maxHealth: WALL_HP, position: wall.position, shelterKey: zoneKey };
+            walls.push(rec);
+            if (typeof registerCollider === 'function') registerCollider(rec.position, 2.2, rec, 'wall', false);
             updateUI();
         }
 
@@ -1149,7 +1265,9 @@
                 shelterFounder = null;
                 if (typeof groupTask !== 'undefined' && groupTask && groupTask.kind === 'found') groupTask = null;
                 activateShelter(key, false);
-                createShelterHouse(key);
+                // Refugio desde 0: mini-casa nivel 1 (crece a fortaleza con reparaciones).
+                if (typeof createMiniShelter === 'function') createMiniShelter(key);
+                else createShelterHouse(key);
                 if (baseResources.heavy >= 1) buildTurretAt(key, false);
                 // Repartir un obrero de la guarnicion mas numerosa
                 const homeCounts = {};
@@ -1227,6 +1345,7 @@
                     createMuzzleFlash(block.position, 0x92400e, 0.08);
                     if (block.health <= 0) {
                         scene.remove(block.mesh);
+                        if (typeof unregisterColliderForRef === 'function') unregisterColliderForRef(block);
                         const bi = barricades.indexOf(block);
                         if (bi > -1) barricades.splice(bi, 1);
                         addLogEvent('Una barricada ha sido destruida por la horda.');
@@ -1246,6 +1365,21 @@
                     if (wallBlock.health <= 0) destroyWall(wallBlock);
                     animateEntityLimbs(z, delta);
                     continue;
+                }
+
+                // Puerta de supervivientes: los zombies no pueden abrirla, la destruyen.
+                if (typeof nearestDoor === 'function') {
+                    const doorBlock = nearestDoor(z.position, 2.8);
+                    if (doorBlock && z.attackCooldown <= 0) {
+                        doorBlock.health -= z.damage * 0.7;
+                        z.attackCooldown = 1.2;
+                        z.isMoving = false;
+                        aimTowards(z, doorBlock.position);
+                        createMuzzleFlash(doorBlock.position, 0x92400e, 0.08);
+                        if (doorBlock.health <= 0 && typeof destroyDoor === 'function') destroyDoor(doorBlock);
+                        animateEntityLimbs(z, delta);
+                        continue;
+                    }
                 }
 
                 // PRIORIDAD: primero destruir el refugio, luego a los supervivientes.
@@ -1358,6 +1492,34 @@
             zone.isActiveShelter = false;
             destroyTurretAt(zoneKey);
             activeShelterKeys = activeShelterKeys.filter(k => k !== zoneKey);
+            // Limpieza fortaleza: muros/puertas/torres del refugio caido + nivel.
+            for (let i = walls.length - 1; i >= 0; i--) {
+                if (walls[i].shelterKey === zoneKey) {
+                    scene.remove(walls[i].mesh);
+                    if (typeof unregisterColliderForRef === 'function') unregisterColliderForRef(walls[i]);
+                    walls.splice(i, 1);
+                }
+            }
+            if (typeof doors !== 'undefined') {
+                for (let i = doors.length - 1; i >= 0; i--) {
+                    if (doors[i].shelterKey === zoneKey) {
+                        scene.remove(doors[i].mesh);
+                        if (typeof unregisterColliderForRef === 'function') unregisterColliderForRef(doors[i]);
+                        doors.splice(i, 1);
+                    }
+                }
+            }
+            for (let i = towers.length - 1; i >= 0; i--) {
+                if (towers[i].zoneKey === zoneKey) {
+                    scene.remove(towers[i].mesh);
+                    if (typeof unregisterColliderForRef === 'function') unregisterColliderForRef(towers[i]);
+                    towers.splice(i, 1);
+                }
+            }
+            if (typeof shelterLevels !== 'undefined') delete shelterLevels[zoneKey];
+            if (typeof customShelters !== 'undefined') delete customShelters[zoneKey];
+            if (typeof groupTask !== 'undefined' && groupTask && groupTask.key === zoneKey) groupTask = null;
+            addLogEvent(`Capacidad máxima ahora ${typeof getMaxSurvivors === 'function' ? getMaxSurvivors() : 5} supervivientes.`);
 
             addLogEvent(`¡EL REFUGIO EN ${zone.name.toUpperCase()} HA SIDO DESTRUIDO!`);
             if (zoneKey === mainShelterKey) {
