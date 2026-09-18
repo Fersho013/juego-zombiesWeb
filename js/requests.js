@@ -4,6 +4,19 @@
  * Parte del proyecto Survivors VS Zombies 3D.
  */
 
+// Paso 6 del plan: si faltan materiales para obra, el equipo los solicita.
+function requestSupplyHelp(reason) {
+    const now = Date.now() / 1000;
+    if (now < (survivorRequestCooldowns.supply || 0)) return;
+    survivorRequestCooldowns.supply = now + SURVIVOR_REQUEST_COOLDOWN;
+    survivorRequests.supply = true;
+    showAirBanner('El grupo de supervivientes necesita suministros', 'fa-solid fa-box-open text-amber-300 text-lg');
+    addLogEvent(`El grupo de supervivientes necesita suministros: faltan ${reason}.`);
+    showToast('El grupo de supervivientes necesita suministros.');
+    if (typeof renderTeamRequests === 'function') renderTeamRequests();
+    if (typeof updateUI === 'function') updateUI();
+}
+
 // El equipo evalua sus necesidades y "presiona botones" de solicitud.
 // Muestra alerta "El grupo de supervivientes necesita X" y habilita ayudas.
 function updateSurvivorRequests(s, nearestZombie, minDist) {
