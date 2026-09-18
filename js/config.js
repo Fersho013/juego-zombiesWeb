@@ -84,6 +84,22 @@
         const grenades = [];
         const missiles = [];
 
+        // ==========================================================
+        // TORRES / LOOT / CURACION (cambios serie 3)
+        // ==========================================================
+        const FIXED_STEP = 1 / 60; // simulacion a 60 fps fijos
+        const TOWER_MAX = 2; // maximo de torres completas en pie
+        const TOWER_WORK_REQUIRED = 400; // segundos-trabajador por torre
+        const TOWER_HEIGHT = 8.4; // altura de la plataforma
+        const TOWER_HP = 400;
+        const BARRICADES_PER_SURVIVOR = 4; // maximo por superviviente
+        const LOOT_CHANCE = 0.22; // prob. de que un zombie suelte loot
+        const LOOT_DESPAWN = 45; // segundos antes de que el loot caduque
+        const towers = []; // {id, mesh, pos, zoneKey, progress, complete, health, occupants[]}
+        const loots = []; // pickups dejados por zombies {mesh, kind, payload, position, age}
+        const healFX = []; // cruces verdes flotantes
+        let towerSeq = 0;
+
         let selectedSurvivorIndex = 0;
 
         // Audio Synthesizer Engine
