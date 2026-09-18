@@ -69,6 +69,24 @@
             });
         }
 
+        function updateCooldownButtons() {
+            const map = { airdrop: 'airdrop', artillery: 'artillery', adrenaline: 'adrenaline', barricade: 'barricade' };
+            Object.keys(map).forEach(type => {
+                const btn = document.getElementById(`btn-interv-${type}`);
+                const label = document.getElementById(`cd-${type}`);
+                if (!btn) return;
+                const left = typeof cooldownRemaining === 'function' ? cooldownRemaining(type) : 0;
+                if (label) label.innerText = left > 0 ? `${left}s` : '';
+                if (left > 0) {
+                    btn.classList.add('opacity-50', 'pointer-events-none');
+                    btn.setAttribute('disabled', 'true');
+                } else {
+                    btn.classList.remove('opacity-50', 'pointer-events-none');
+                    btn.removeAttribute('disabled');
+                }
+            });
+        }
+
         function updateUI() {
             document.getElementById('wave-number-display').innerText = currentWave;
             document.getElementById('zombie-count-display').innerText = `${zombiesAliveCount} / ${zombiesToSpawn}`;
@@ -89,9 +107,10 @@
 
             const s = survivors[selectedSurvivorIndex];
             if (s) {
+                const wlabel = (typeof WEAPONS !== 'undefined' && WEAPONS[s.primary]) ? WEAPONS[s.primary].label : s.weapon;
                 document.getElementById('survivor-name-display').innerText = s.name;
                 document.getElementById('survivor-role-badge').innerText = s.role;
-                document.getElementById('survivor-weapon-display').innerText = `Arma: ${s.weapon}`;
+                document.getElementById('survivor-weapon-display').innerText = `Arma: ${wlabel} | Granadas: ${s.grenades || 0}`;
                 document.getElementById('survivor-state-display').innerText = s.health <= 0 ? 'Caído en combate' : s.thoughtText;
 
                 document.getElementById('val-health').innerText = `${Math.round(s.health)} / ${s.maxHealth}`;
@@ -104,13 +123,14 @@
                 document.getElementById('bar-ammo').style.width = `${Math.min(100, (s.ammo / 120) * 100)}%`;
 
                 document.getElementById('survivor-melee-val').innerText = s.melee;
-                document.getElementById('survivor-heavy-val').innerText = s.heavy;
-                document.getElementById('survivor-crate-val').innerText = s.carriedCrate ? s.carriedCrate.config.name : 'Ninguna (Manos Libres)';
+                document.getElementById('survivor-heavy-val').innerText = `Granadas (${s.grenades || 0})`;
+                document.getElementById('survivor-crate-val').innerText = s.carriedCrate ? s.carriedCrate.config.name : (s.buildTarget ? 'Material de barricada' : 'Ninguna (Manos Libres)');
                 document.getElementById('survivor-kills-val').innerText = s.kills;
 
                 document.getElementById('survivor-avatar-icon').style.backgroundColor = `#${s.colorHex.toString(16)}`;
             }
 
+            if (typeof updateCooldownButtons === 'function') updateCooldownButtons();
             updateFloatingThoughtBubbles();
         }
 
