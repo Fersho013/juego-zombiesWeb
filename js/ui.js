@@ -198,7 +198,22 @@
             }
 
             if (typeof updateCooldownButtons === 'function') updateCooldownButtons();
+            if (typeof updateReinforceButton === 'function') updateReinforceButton();
+            if (typeof renderTeamRequests === 'function') renderTeamRequests();
             updateFloatingThoughtBubbles();
+        }
+
+        function renderTeamRequests() {
+            const box = document.getElementById('team-requests');
+            if (!box || typeof survivorRequests === 'undefined') return;
+            const items = [];
+            if (survivorRequests.supply) items.push('<div class="p-1.5 rounded-xl bg-amber-500/15 border border-amber-500/40 text-amber-200 font-bold">El grupo de supervivientes necesita suministros.</div>');
+            if (survivorRequests.airstrike) items.push('<div class="p-1.5 rounded-xl bg-red-500/15 border border-red-500/40 text-red-200 font-bold">El grupo de supervivientes necesita ataque aéreo.</div>');
+            if (survivorRequests.reinforce) {
+                const dead = survivors.filter(o => o.health <= 0).length;
+                items.push(`<div class="p-1.5 rounded-xl bg-emerald-500/15 border border-emerald-500/40 text-emerald-200 font-bold">El grupo de supervivientes necesita refuerzos (${dead} por rescatar).</div>`);
+            }
+            box.innerHTML = items.length ? items.join('') : '<div class="text-slate-500 italic">El equipo aún no solicita ayuda...</div>';
         }
 
         function updateFloatingThoughtBubbles() {
