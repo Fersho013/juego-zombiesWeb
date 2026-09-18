@@ -51,7 +51,10 @@
                 const healthColor = zone.health > 50 ? 'bg-emerald-500' : zone.health > 20 ? 'bg-amber-500' : 'bg-rose-600';
                 const mainStar = (typeof mainShelterKey !== 'undefined' && key === mainShelterKey) ? ' ★' : '';
                 const wallInfo = (typeof shelterWallCount === 'function' && walls.some(w => w.shelterKey === key))
-                    ? ` • <i class="fa-solid fa-house-chimney"></i>${shelterWallCount(key)}/4` : '';
+                    ? ` • <i class="fa-solid fa-house-chimney"></i>${shelterWallCount(key)}seg Nv${(typeof shelterLevels !== 'undefined' && shelterLevels[key]) || 1}` : '';
+                const towerInfo = (typeof countTowersForShelter === 'function' && typeof towerLimitForShelter === 'function')
+                    ? ` • <i class="fa-solid fa-tower-observation"></i>${countTowersForShelter(key)}/${towerLimitForShelter(key)}` : '';
+                const capInfo = (typeof getMaxSurvivors === 'function') ? ` • Max:${getMaxSurvivors()}` : '';
 
                 const card = document.createElement('div');
                 card.className = 'space-y-1 text-xs bg-slate-900/60 p-2.5 rounded-2xl border border-slate-800';
@@ -64,8 +67,8 @@
                         <div class="h-full ${healthColor} transition-all duration-300" style="width: ${Math.max(0, zone.health)}%"></div>
                     </div>
                     <div class="flex justify-between text-[9px] text-slate-400">
-                        <span><i class="fa-solid fa-tower-observation mr-1"></i>${turretLabel}</span>
-                        <span>${Math.round(zone.health)}%</span>
+                        <span><i class="fa-solid fa-tower-observation mr-1"></i>${turretLabel}${towerInfo}</span>
+                        <span>${Math.round(zone.health)}%${capInfo}</span>
                     </div>
                 `;
                 container.appendChild(card);
@@ -134,15 +137,10 @@
                     aliveIds.push('shelter-repair-bar');
                 }
             }
-            // Muros dañados de casas-refugio
-            if (typeof walls !== 'undefined') {
-                walls.filter(w => w.health < w.maxHealth).slice(0, 6).forEach((w, i) => {
-                    const pct = Math.max(0, Math.round(w.health / w.maxHealth * 100));
-                    structureBar(wrap, `wall-bar-${w.shelterKey}-${i}`, `Muro ${ZONES[w.shelterKey].name}`,
-                        '<i class="fa-solid fa-house-chimney text-sky-300 mr-1"></i>', pct, `${pct}%`);
-                    aliveIds.push(`wall-bar-${w.shelterKey}-${i}`);
-                });
-            }
+            // Muros de supervivientes: sin cartel ni barra HP (no afecta, solo visual limpio).
+            Array.from(wrap.children).forEach(ch => {
+                if (ch.id && ch.id.indexOf('wall-bar-') === 0) wrap.removeChild(ch);
+            });
             Array.from(wrap.children).forEach(ch => {
                 if (!aliveIds.includes(ch.id)) wrap.removeChild(ch);
             });
