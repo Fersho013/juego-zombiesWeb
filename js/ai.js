@@ -331,7 +331,8 @@
                         if (!updateTowerOccupy(s, homeZone)) {
                             s.aiState = 'DEFEND_BASE';
                             s.thoughtText = `Defendiendo ${homeZone.name}`;
-                            const defPos = homeZone.pos.clone().add(new THREE.Vector3(Math.cos(s.id * 1.7) * homeZone.radius * 0.4, 0, Math.sin(s.id * 1.7) * homeZone.radius * 0.4));
+                            // Puestos cerca del perimetro (no apilados en el centro).
+                            const defPos = homeZone.pos.clone().add(new THREE.Vector3(Math.cos(s.id * 1.7) * homeZone.radius * 0.75, 0, Math.sin(s.id * 1.7) * homeZone.radius * 0.75));
                             if (s.position.distanceTo(defPos) > 2) {
                                 moveTowards(s, defPos, 0.12);
                             } else {
@@ -348,6 +349,31 @@
                     const homeZone = ZONES[s.homeZoneKey] || ZONES['MALL'];
                     if (s.onTower) dismountTower(s); // de dia se baja a trabajar
 
+                    // Anti-camp: el interior no es zona de estancia. Si lleva dentro
+                    // demasiado tiempo sin depositar, evacua al rally exterior.
+                    const distHome = s.position.distanceTo(homeZone.pos);
+                    const insideNow = distHome < homeZone.radius - 1;
+                    if (insideNow && !s.carriedCrate) {
+                        s._insideTime = (s._insideTime || 0) + delta * gameSpeed;
+                    } else {
+                        s._insideTime = 0;
+                    }
+                    // Tras depositar, salida inmediata al rally (touch-and-go).
+                    if (s._leaveShelter > 0) {
+                        s._leaveShelter -= delta * gameSpeed;
+                        s.thoughtText = 'Entrega hecha, saliendo del refugio...';
+                        moveTowards(s, rallyPointForZone(homeZone), 0.11);
+                        animateEntityLimbs(s, delta);
+                        return;
+                    }
+                    if ((s._insideTime || 0) > 6) {
+                        s._insideTime = 0;
+                        s.thoughtText = 'Despejando interior, al punto de reunión...';
+                        moveTowards(s, rallyPointForZone(homeZone), 0.12);
+                        animateEntityLimbs(s, delta);
+                        return;
+                    }
+
                     if (healBusy) {
                         // Curando a un aliado: sin otras tareas este frame
                     } else if (s.carriedCrate) {
@@ -356,6 +382,8 @@
 
                         if (distToBase < 4) {
                             depositCrateAtBase(s);
+                            s._insideTime = 0;
+                            s._leaveShelter = 3; // 3s de salida directa al rally
                         } else {
                             moveTowards(s, homeZone.pos, 0.1);
                         }
@@ -399,7 +427,7 @@
                                     else moveTowards(s, s.targetLoot.position, 0.11);
                                 } else {
                                     s.thoughtText = 'Buscando materiales...';
-                                    moveTowards(s, homeZone.pos, 0.08);
+                                    moveTowards(s, rallyPointForZone(homeZone), 0.08);
                                 }
                             }
                         } else {
@@ -442,8 +470,10 @@
                                 } else if (updateSurvivorBuild(s, delta, homeZone)) {
                                     // construyendo barricada este frame
                                 } else {
+                                    // Patrulla EXTERIOR (anillo fuera de muros), nunca dentro.
                                     s.thoughtText = "Patrullando perímetro...";
-                                    const patrolPos = homeZone.pos.clone().add(new THREE.Vector3(Math.cos(s.id + clock.getElapsedTime() * 0.5) * 10, 0, Math.sin(s.id + clock.getElapsedTime() * 0.5) * 10));
+                                    const pr = homeZone.radius + 8;
+                                    const patrolPos = homeZone.pos.clone().add(new THREE.Vector3(Math.cos(s.id + clock.getElapsedTime() * 0.5) * pr, 0, Math.sin(s.id + clock.getElapsedTime() * 0.5) * pr));
                                     moveTowards(s, patrolPos, 0.08);
                                 }
                             }
@@ -505,6 +535,22 @@
             const id = (entity.id !== undefined) ? entity.id : 0;
             const ang = (id * 2.4) % (Math.PI * 2);
             return new THREE.Vector3(center.x + Math.cos(ang) * radius, 0, center.z + Math.sin(ang) * radius);
+        }
+        // Doctrina "campamento exterior": el refugio NO se habita por dentro.
+        // Punto de reunion fuera del refugio (hacia el centro del mapa).
+        function rallyPointForZone(zone) {
+            let dx = 0 - zone.pos.x, dz = 0 - zone.pos.z;
+            if (Math.hypot(dx, dz) < 1) { dx = 0; dz = 1; }
+            const l = Math.hypot(dx, dz);
+            dx /= l; dz /= l;
+            return new THREE.Vector3(zone.pos.x + dx * (zone.radius + 9), 0, zone.pos.z + dz * (zone.radius + 9));
+        }
+        // Puesto de trabajo exterior: anillo fuera de muros, un angulo por unidad.
+        function exteriorStandSlot(zone, entity, standOff) {
+            const id = (entity.id !== undefined) ? entity.id : 0;
+            const ang = (id * 2.4) % (Math.PI * 2);
+            const r = zone.radius + (standOff || 4);
+            return new THREE.Vector3(zone.pos.x + Math.cos(ang) * r, 0, zone.pos.z + Math.sin(ang) * r);
         }
         function moveTowards(entity, targetPos, speed) {
             const dir = new THREE.Vector3().subVectors(targetPos, entity.position);
@@ -833,9 +879,10 @@
             }
             const zone = ZONES[missing];
             const d = s.position.distanceTo(zone.pos);
-            if (d > 5) {
+            // Instalacion desde el exterior (no hace falta entrar al centro).
+            if (d > zone.radius + 6) {
                 s.thoughtText = `Yendo a instalar torreta en ${zone.name} (paso 2)...`;
-                moveTowards(s, zone.pos, 0.11);
+                moveTowards(s, exteriorStandSlot(zone, s, 4), 0.11);
                 return true;
             }
             s.isMoving = false;
@@ -933,9 +980,9 @@
         }
 
         function findBarricadeSpot(s, zone) {
-            // Esquina libre del cuadrado centrada en su puesto de defensa
-            const cx = zone.pos.x + Math.cos(s.id * 1.7) * zone.radius * 0.4;
-            const cz = zone.pos.z + Math.sin(s.id * 1.7) * zone.radius * 0.4;
+            // Barricadas en el perimetro EXTERIOR (fuera de muros), no dentro.
+            const cx = zone.pos.x + Math.cos(s.id * 1.7) * (zone.radius + 5);
+            const cz = zone.pos.z + Math.sin(s.id * 1.7) * (zone.radius + 5);
             for (let k = 0; k < 4; k++) {
                 const slot = (s.buildSlot + k) % 4;
                 const px = cx + BARRICADE_SQUARE[slot][0];
@@ -959,8 +1006,8 @@
         function findFortifySpot(s, zone, type) {
             const spots = [];
             if (type === 'spike') {
-                const cx = zone.pos.x + Math.cos(s.id * 1.7) * zone.radius * 0.4;
-                const cz = zone.pos.z + Math.sin(s.id * 1.7) * zone.radius * 0.4;
+                const cx = zone.pos.x + Math.cos(s.id * 1.7) * (zone.radius + 5);
+                const cz = zone.pos.z + Math.sin(s.id * 1.7) * (zone.radius + 5);
                 for (let k = 0; k < 4; k++) {
                     const slot = (s.buildSlot + k) % 4;
                     spots.push(new THREE.Vector3(cx + BARRICADE_SQUARE[slot][0], 0, cz + BARRICADE_SQUARE[slot][1]));
@@ -1253,10 +1300,12 @@
                 if (typeof groupTask !== 'undefined' && groupTask && groupTask.kind === 'repair') groupTask = null;
                 return false;
             }
+            // Reparar DESDE FUERA: puesto exterior propio, sin entrar al interior.
+            const stand = exteriorStandSlot(target.zone, s, 4);
             const d = s.position.distanceTo(target.zone.pos);
-            if (d > target.zone.radius * 0.7) {
-                s.thoughtText = `Yendo a reconstruir ${target.zone.name}...`;
-                moveTowards(s, target.zone.pos, 0.11);
+            if (d > target.zone.radius + 6) {
+                s.thoughtText = `Yendo a reconstruir ${target.zone.name} (exterior)...`;
+                moveTowards(s, stand, 0.11);
                 return true;
             }
             s.isMoving = false;
@@ -1390,9 +1439,10 @@
             }
             const zone = ZONES[shelterFounder.zoneKey];
             const d = s.position.distanceTo(zone.pos);
-            if (d > 4) {
+            // Fundar desde el perimetro (anillo propio), sin amontonarse en el centro.
+            if (d > 10) {
                 s.thoughtText = `Yendo a fundar refugio en ${zone.name}...`;
-                moveTowards(s, personalSlot(zone.pos, s, 2.4), 0.11);
+                moveTowards(s, personalSlot(zone.pos, s, 6), 0.11);
                 return true;
             }
             s.isMoving = false;
