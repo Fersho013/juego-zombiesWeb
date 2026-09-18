@@ -76,26 +76,8 @@
             createMuzzleFlash(targetZombie.position, 0xffffff, 0.15);
 
             if (targetZombie.health <= 0 && !targetZombie.dying) {
-                targetZombie.health = 0;
-                targetZombie.dying = true;
-                targetZombie.deathTimer = 0;
-                dyingZombies.push(targetZombie);
-
-                zombiesAliveCount = Math.max(0, zombiesAliveCount - 1);
-
-                // Otorgar la baja al superviviente más cercano vivo (aprox. quien disparó)
-                let closestSurvivor = null, minD = 6;
-                survivors.forEach(s => {
-                    if (s.health > 0) {
-                        const d = s.position.distanceTo(targetZombie.position);
-                        if (d < minD) { minD = d; closestSurvivor = s; }
-                    }
-                });
-                if (closestSurvivor) closestSurvivor.kills++;
-
-                if (zombiesAliveCount === 0 && isWaveActive) {
-                    endWaveSuccess();
-                }
+                // Baja acreditada al superviviente vivo mas cercano (aprox. quien disparo)
+                killZombie(targetZombie, closestKillerTo(targetZombie.position, 30));
             }
 
             updateUI();
@@ -117,7 +99,7 @@
                 bar.rotation.y = angle;
                 bar.castShadow = true;
                 scene.add(bar);
-                barricades.push(bar);
+                barricades.push({ mesh: bar, health: 80, maxHealth: 80, position: bar.position, owner: null, builtBy: 'Escombros' });
             }
         }
 
