@@ -89,6 +89,7 @@ function animate() {
                 updateSurvivorAI(delta);
                 updateZombieAI(delta);
                 updateProjectiles(delta);
+                if (typeof updateAirSupport === 'function') updateAirSupport(delta);
             }
 
             if (cameraMode === 'follow' && survivors[selectedSurvivorIndex]) {
