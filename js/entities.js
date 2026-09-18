@@ -433,7 +433,7 @@
             scene.add(mesh);
             const rec = { mesh: mesh, health: WALL_HP, maxHealth: WALL_HP, position: mesh.position, shelterKey: shelterKey };
             walls.push(rec);
-            if (typeof registerCollider === 'function') registerCollider(rec.position, 2.2, rec, 'wall', false);
+            if (typeof registerCollider === 'function') registerCollider(rec.position, 1.6, rec, 'wall', false);
             return rec;
         }
         // Ventana nueva (marco + tabla, HP 100): tapa parcial sin cerrar paso principal.
@@ -490,7 +490,7 @@
                     group.add(seg);
                     const wrec = { mesh: seg, health: WALL_HP, maxHealth: WALL_HP, position: seg.position, shelterKey: zoneKey };
                     walls.push(wrec);
-                    if (typeof registerCollider === 'function') registerCollider(wrec.position, segLen / 2 * 0.9, wrec, 'wall', false);
+                    if (typeof registerCollider === 'function') registerCollider(wrec.position, 1.6, wrec, 'wall', false);
                 });
                 // Marco de puerta destruido/abierto + puerta de supervivientes.
                 const frame = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.4, 0.7), frameMat);
@@ -520,7 +520,7 @@
                     scene.add(outer);
                     const orec = { mesh: outer, health: WALL_HP, maxHealth: WALL_HP, position: outer.position, shelterKey: zoneKey };
                     walls.push(orec);
-                    if (typeof registerCollider === 'function') registerCollider(orec.position, segLen / 2 * 0.9, orec, 'wall', false);
+                    if (typeof registerCollider === 'function') registerCollider(orec.position, 1.6, orec, 'wall', false);
                 }
             });
             // Losa de suelo (mas grande con nivel)
