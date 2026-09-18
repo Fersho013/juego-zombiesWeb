@@ -914,42 +914,95 @@
             return null;
         }
 
-        function updateSurvivorBuild(s, delta, homeZone) {
-            // Tope: 4 barricadas vivas por superviviente
-            if (countOwnBarricades(s) >= BARRICADES_PER_SURVIVOR) return false;
-            // Iniciar construccion: sin oleada y con recurso
-            if (!s.buildTarget) {
-                if (isWaveActive) return false;
-                if (baseResources.ammo < 1) return false;
-                if (s.role !== 'Ingeniero' && Math.random() > 0.004 * gameSpeed) return false;
-                s.buildTarget = findBarricadeSpot(s, homeZone);
-                if (!s.buildTarget) return false; // cuadrado completo
-                s.buildProgress = 0;
-                s.thoughtText = 'Buscando punto para barricada...';
+        // --- Refuerzo INDIVIDUAL: cada pieza la construye UN solo superviviente.
+        // Tipos: muro nuevo, puerta nueva, ventana nueva, barricada con pinchos.
+        // Solo torre y reforzar refugio (repair) son grupales; esto siempre es 1x1.
+        function isFortifySpotClaimed(pos, self) {
+            return survivors.some(o => o !== self && o.health > 0 && o.fortify && o.fortify.target &&
+                Math.hypot(o.fortify.target.x - pos.x, o.fortify.target.z - pos.z) < 3);
+        }
+        function findFortifySpot(s, zone, type) {
+            const spots = [];
+            if (type === 'spike') {
+                const cx = zone.pos.x + Math.cos(s.id * 1.7) * zone.radius * 0.4;
+                const cz = zone.pos.z + Math.sin(s.id * 1.7) * zone.radius * 0.4;
+                for (let k = 0; k < 4; k++) {
+                    const slot = (s.buildSlot + k) % 4;
+                    spots.push(new THREE.Vector3(cx + BARRICADE_SQUARE[slot][0], 0, cz + BARRICADE_SQUARE[slot][1]));
+                }
+            } else {
+                // Anillo perimetral: 8 puntos a radio+6 (muros/puertas/ventanas).
+                for (let k = 0; k < 8; k++) {
+                    const ang = (k / 8) * Math.PI * 2 + s.id * 0.2;
+                    spots.push(new THREE.Vector3(zone.pos.x + Math.cos(ang) * (zone.radius + 6), 0, zone.pos.z + Math.sin(ang) * (zone.radius + 6)));
+                }
             }
-            const d = s.position.distanceTo(s.buildTarget);
-            if (d > 2) {
-                s.thoughtText = 'Llevando materiales para barricada...';
-                moveTowards(s, s.buildTarget, 0.11);
+            for (const p of spots) {
+                let occupied = false;
+                barricades.forEach(b => { if (b.health > 0 && Math.hypot(b.position.x - p.x, b.position.z - p.z) < 2.5) occupied = true; });
+                walls.forEach(w => { if (w.health > 0 && Math.hypot(w.position.x - p.x, w.position.z - p.z) < 3) occupied = true; });
+                if (typeof doors !== 'undefined') doors.forEach(d => { if (d.health > 0 && Math.hypot(d.position.x - p.x, d.position.z - p.z) < 3) occupied = true; });
+                if (occupied || isFortifySpotClaimed(p, s)) continue;
+                return p;
+            }
+            return null;
+        }
+        function updateIndividualFortify(s, delta, homeZone) {
+            if (isWaveActive) return false;
+            // Continuar pieza propia en curso.
+            if (s.fortify && s.fortify.target) {
+                const f = s.fortify;
+                const d = s.position.distanceTo(f.target);
+                if (d > 2) {
+                    s.thoughtText = `Llevando materiales (${f.type})...`;
+                    moveTowards(s, f.target, 0.11);
+                    return true;
+                }
+                s.isMoving = false;
+                s.hammering = true;
+                aimTowards(s, homeZone.pos);
+                f.progress += delta * gameSpeed;
+                const pct = Math.min(99, Math.round(f.progress / f.required * 100));
+                s.thoughtText = `Construyendo ${f.type} ${pct}% (individual)`;
+                if (f.progress >= f.required) {
+                    if (baseResources.ammo < 1) { s.fortify = null; return false; }
+                    baseResources.ammo = Math.max(0, baseResources.ammo - 1);
+                    if (f.type === 'muro') {
+                        if (typeof buildFortifyWall === 'function') buildFortifyWall(homeZone.key, f.target.x, f.target.z, 0);
+                    } else if (f.type === 'puerta') {
+                        if (typeof createSurvivorDoor === 'function') createSurvivorDoor(homeZone.key, f.target.x, f.target.z, 0);
+                    } else if (f.type === 'ventana') {
+                        if (typeof buildFortifyWindow === 'function') buildFortifyWindow(homeZone.key, f.target.x, f.target.z, 0);
+                    } else if (f.type === 'pinchos') {
+                        if (typeof createSpikeBarricade === 'function') { const r = createSpikeBarricade(f.target.x, f.target.z, s); }
+                    }
+                    addLogEvent(`${s.name} construyó ${f.type} (individual) en ${homeZone.name}.`);
+                    s.fortify = null;
+                    s.buildSlot = ((s.buildSlot || 0) + 1) % 4;
+                    updateUI();
+                }
                 return true;
             }
-            // Construyendo in-situ (~3s)
-            s.isMoving = false;
-            s.hammering = true; // animacion de martillar
-            aimTowards(s, homeZone.pos);
-            s.buildProgress += delta * gameSpeed;
-            s.thoughtText = `Construyendo barricada ${Math.min(99, Math.round(s.buildProgress / 3 * 100))}%`;
-            if (s.buildProgress >= 3) {
-                baseResources.ammo = Math.max(0, baseResources.ammo - 1);
-                const rec = createSurvivorBarricade(s.buildTarget.x, s.buildTarget.z, false);
-                rec.owner = s;
-                s.buildSlot = (s.buildSlot + 1) % 4;
-                addLogEvent(`${s.name} construyo una barricada (${countOwnBarricades(s)}/${BARRICADES_PER_SURVIVOR}) cerca de ${homeZone.name}.`);
-                s.buildTarget = null;
-                s.buildProgress = 0;
-                updateUI();
+            // Nueva pieza propia (round-robin por superviviente, con topes).
+            if (baseResources.ammo < 1) return false;
+            if (s.role !== 'Ingeniero' && Math.random() > 0.006 * gameSpeed) return false;
+            const order = ['muro', 'puerta', 'ventana', 'pinchos'];
+            s.fortifyCycle = ((s.fortifyCycle || 0) + 1) % order.length;
+            for (let n = 0; n < order.length; n++) {
+                const type = order[(s.fortifyCycle + n) % order.length];
+                if (type === 'pinchos' && countOwnBarricades(s) >= BARRICADES_PER_SURVIVOR) continue;
+                if (type === 'puerta' && typeof doors !== 'undefined' && doors.filter(dd => dd.shelterKey === homeZone.key).length >= 8) continue;
+                const spot = findFortifySpot(s, homeZone, type === 'pinchos' ? 'spike' : 'wall');
+                if (!spot) continue;
+                s.fortify = { type: type, target: spot, progress: 0, required: type === 'muro' ? 4 : 3 };
+                s.thoughtText = `Iniciando ${type} (individual)...`;
+                return true;
             }
-            return true;
+            return false;
+        }
+        function updateSurvivorBuild(s, delta, homeZone) {
+            // Compat: ahora todo el refuerzo es individual (1x1).
+            return updateIndividualFortify(s, delta, homeZone);
         }
 
         // ==========================================================
@@ -1385,6 +1438,7 @@
                 z.attackCooldown = Math.max(0, z.attackCooldown - delta);
 
                 // Barricada bloqueando el paso: el zombie la golpea primero
+                // (pinchos devuelven daño al atacante).
                 const block = nearestBarricade(z.position, 2.8);
                 if (block && z.attackCooldown <= 0) {
                     block.health -= z.damage * 0.6;
@@ -1392,6 +1446,14 @@
                     z.isMoving = false;
                     aimTowards(z, block.position);
                     createMuzzleFlash(block.position, 0x92400e, 0.08);
+                    if (block.spiked) {
+                        z.health -= 6;
+                        if (z.health <= 0 && !z.dying && typeof killZombie === 'function') {
+                            killZombie(z, block.owner && block.owner.health > 0 ? block.owner : closestKillerTo(z.position, 25));
+                            animateEntityLimbs(z, delta);
+                            continue;
+                        }
+                    }
                     if (block.health <= 0) {
                         scene.remove(block.mesh);
                         if (typeof unregisterColliderForRef === 'function') unregisterColliderForRef(block);
