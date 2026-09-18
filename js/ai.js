@@ -94,7 +94,14 @@
                 damage: (5 + currentWave * 0.7) * type.damageMult,
                 attackCooldown: 0,
                 dying: false,
-                deathTimer: 0
+                deathTimer: 0,
+                // Cerebro completo: estado + foco persistente + re-evaluacion.
+                state: 'SEEK', // SEEK | CHASE | BREACH | SIEGE | HUNT | WANDER
+                focusKey: null, // refugio objetivo
+                victim: null, // superviviente objetivo
+                retarget: Math.random() * 0.7, // temporizador de re-evaluacion
+                attackTarget: null, // obstaculo que golpea
+                attackTime: 0 // watchdog: no martillar lo mismo sin fin
             };
 
             zombies.push(zombieData);
@@ -1034,6 +1041,13 @@
             // Continuar pieza propia en curso.
             if (s.fortify && s.fortify.target) {
                 const f = s.fortify;
+                // Fin garantizado: max 40s por pieza, luego se abandona.
+                f.elapsed = (f.elapsed || 0) + delta * gameSpeed;
+                if (f.elapsed >= TASK_MAX.fortify) {
+                    s.fortify = null;
+                    s.thoughtText = 'Obra individual pausada, replanificando...';
+                    return false; // fin: timeout, siguiente prioridad
+                }
                 const d = s.position.distanceTo(f.target);
                 if (d > 2) {
                     s.thoughtText = `Llevando materiales (${f.type})...`;
@@ -1102,13 +1116,22 @@
         }
 
         function updateSurvivorHeal(s, delta) {
-            if ((s.medkits || 0) <= 0) { s.healTarget = null; return false; }
+            if ((s.medkits || 0) <= 0) { s.healTarget = null; s._healWho = null; s._healElapsed = 0; return false; }
             let ally = s.healTarget;
             if (!ally || ally.health <= 0 || ally.onTower || ally.health >= ally.maxHealth * 0.95) {
                 ally = findWoundedAlly(s);
                 s.healTarget = ally;
             }
-            if (!ally) return false;
+            if (!ally) { s._healWho = null; s._healElapsed = 0; return false; }
+            // Fin garantizado: max 25s por aliado, luego se suelta y replanifica.
+            const allyId = ally.name || ally.id;
+            if (s._healWho !== allyId) { s._healWho = allyId; s._healElapsed = 0; }
+            s._healElapsed += delta * gameSpeed;
+            if (s._healElapsed >= TASK_MAX.heal) {
+                s.healTarget = null; s._healWho = null; s._healElapsed = 0;
+                s.thoughtText = 'Cura pausada, a otra tarea...';
+                return false; // fin: timeout, siguiente prioridad
+            }
             const d = s.position.distanceTo(ally.position);
             if (d > 2.2) {
                 s.thoughtText = `Corriendo a curar a ${ally.name}...`;
@@ -1129,7 +1152,7 @@
             if (ally.health >= ally.maxHealth * 0.95) {
                 s.medkits--;
                 addLogEvent(`${s.name} curo a ${ally.name} con un botiquin.`);
-                s.healTarget = null;
+                s.healTarget = null; s._healWho = null; s._healElapsed = 0; // fin: curado
                 updateUI();
             }
             return true;
@@ -1370,6 +1393,20 @@
                 groupTask = null; // 100% completado: liberar para la siguiente tarea
                 addLogEvent(`${target.zone.name} reconstruido al 100%. Pasando a la siguiente tarea del plan.`);
             }
+            // Fin anti-estancamiento: si el % no avanza en 45s, se suelta la obra
+            // y se replanifica (nadie martilla sin fin lo mismo).
+            if (typeof groupTask !== 'undefined' && groupTask && groupTask.kind === 'repair') {
+                if (groupTask._lastPct === undefined) { groupTask._lastPct = pct; groupTask._stall = 0; }
+                if (pct > groupTask._lastPct) { groupTask._lastPct = pct; groupTask._stall = 0; }
+                else {
+                    groupTask._stall = (groupTask._stall || 0) + delta * gameSpeed;
+                    if (groupTask._stall >= TASK_MAX.repairStall) {
+                        addLogEvent(`Reparación en ${target.zone.name} pausada sin avance: se replanifica.`);
+                        groupTask = null;
+                        return false; // fin: stall, siguiente prioridad
+                    }
+                }
+            }
             return true;
         }
 
@@ -1438,13 +1475,25 @@
                 updateUI();
             }
             const zone = ZONES[shelterFounder.zoneKey];
+            if ((s._foundCooldown || 0) > 0) {
+                s._foundCooldown -= delta * gameSpeed;
+                return false; // fin temporal: pausa personal, otra prioridad
+            }
             const d = s.position.distanceTo(zone.pos);
             // Fundar desde el perimetro (anillo propio), sin amontonarse en el centro.
             if (d > 10) {
                 s.thoughtText = `Yendo a fundar refugio en ${zone.name}...`;
                 moveTowards(s, personalSlot(zone.pos, s, 6), 0.11);
+                // Fin anti-viaje-infinito: 60s sin llegar -> pausa personal 15s.
+                s._foundTravel = (s._foundTravel || 0) + delta * gameSpeed;
+                if (s._foundTravel >= 60) {
+                    s._foundTravel = 0; s._foundCooldown = 15;
+                    s.thoughtText = 'Fundación pausada, a otra tarea...';
+                    return false; // fin: timeout de viaje, siguiente prioridad
+                }
                 return true;
             }
+            s._foundTravel = 0; // fin del viaje: martillando, la obra avanza
             s.isMoving = false;
             s.hammering = true;
             aimTowards(s, zone.pos);
@@ -1524,12 +1573,18 @@
                 if (z.health <= 0) continue;
 
                 z.attackCooldown = Math.max(0, z.attackCooldown - delta);
+                // Bonus de demolición por tipo (definido antes de usarse).
+                const breachMult = z.typeKey === 'MEDIUM' ? 1.4 : 1.0;
+                const siegeMult = z.typeKey === 'LARGE' ? 1.5 : 1.0;
 
-                // Barricada bloqueando el paso: el zombie la golpea primero
-                // (pinchos devuelven daño al atacante).
+                // BREACH: barricada bloqueando el paso (con fin: se rompe o re-evalua).
                 const block = nearestBarricade(z.position, 2.8);
                 if (block && z.attackCooldown <= 0) {
-                    block.health -= z.damage * 0.6;
+                    if (typeof taskExpired === 'function' && taskExpired(z, 'atkB', TASK_MAX.zombieAttack, delta)) {
+                        z.retarget = 0; // fin: deja ese obstaculo y re-evalua
+                    } else {
+                    z.state = 'BREACH';
+                    block.health -= z.damage * 0.6 * breachMult;
                     z.attackCooldown = 1.2;
                     z.isMoving = false;
                     aimTowards(z, block.position);
@@ -1551,100 +1606,169 @@
                     }
                     animateEntityLimbs(z, delta);
                     continue;
+                    }
                 }
 
-                // Muro de casa-refugio en el camino: tambien lo golpea
+                // Muro de casa-refugio en el camino: tambien lo golpea (BREACH).
                 const wallBlock = nearestWall(z.position, 2.8);
                 if (wallBlock && z.attackCooldown <= 0) {
-                    wallBlock.health -= z.damage * 0.6;
-                    z.attackCooldown = 1.2;
-                    z.isMoving = false;
-                    aimTowards(z, wallBlock.position);
-                    createMuzzleFlash(wallBlock.position, 0x92400e, 0.08);
-                    if (wallBlock.health <= 0) destroyWall(wallBlock);
-                    animateEntityLimbs(z, delta);
-                    continue;
+                    if (typeof taskExpired === 'function' && taskExpired(z, 'atkW', TASK_MAX.zombieAttack, delta)) {
+                        z.retarget = 0; // fin: deja ese muro y re-evalua
+                    } else {
+                        z.state = 'BREACH';
+                        wallBlock.health -= z.damage * 0.6 * breachMult;
+                        z.attackCooldown = 1.2;
+                        z.isMoving = false;
+                        aimTowards(z, wallBlock.position);
+                        createMuzzleFlash(wallBlock.position, 0x92400e, 0.08);
+                        if (wallBlock.health <= 0) destroyWall(wallBlock);
+                        animateEntityLimbs(z, delta);
+                        continue;
+                    }
                 }
 
                 // Puerta de supervivientes: los zombies no pueden abrirla, la destruyen.
                 if (typeof nearestDoor === 'function') {
                     const doorBlock = nearestDoor(z.position, 2.8);
                     if (doorBlock && z.attackCooldown <= 0) {
-                        doorBlock.health -= z.damage * 0.7;
-                        z.attackCooldown = 1.2;
-                        z.isMoving = false;
-                        aimTowards(z, doorBlock.position);
-                        createMuzzleFlash(doorBlock.position, 0x92400e, 0.08);
-                        if (doorBlock.health <= 0 && typeof destroyDoor === 'function') destroyDoor(doorBlock);
-                        animateEntityLimbs(z, delta);
-                        continue;
+                        if (typeof taskExpired === 'function' && taskExpired(z, 'atkD', TASK_MAX.zombieAttack, delta)) {
+                            z.retarget = 0; // fin: deja esa puerta y re-evalua
+                        } else {
+                            z.state = 'BREACH';
+                            doorBlock.health -= z.damage * 0.7 * breachMult;
+                            z.attackCooldown = 1.2;
+                            z.isMoving = false;
+                            aimTowards(z, doorBlock.position);
+                            createMuzzleFlash(doorBlock.position, 0x92400e, 0.08);
+                            if (doorBlock.health <= 0 && typeof destroyDoor === 'function') destroyDoor(doorBlock);
+                            animateEntityLimbs(z, delta);
+                            continue;
+                        }
                     }
                 }
 
-                // PRIORIDAD: primero destruir el refugio, luego a los supervivientes.
-                // Solo se desvia a un superviviente si esta a contacto (<6u).
+                // CEREBRO COMPLETO: estados SEEK/CHASE/BREACH/SIEGE/HUNT/WANDER.
+                // Re-evaluacion cada 0.7s (foco persistente, sin flip-flop).
+                // Prioridad: refugio primero, superviviente al contacto, ruido atrae.
+                z.retarget = (z.retarget || 0) - delta * gameSpeed;
                 let targetSurvivor = null;
                 let minDist = 999;
-
                 survivors.forEach(s => {
                     if (s.health > 0 && !s.onTower) { // en torre estan fuera de alcance
                         const d = z.position.distanceTo(s.position);
                         if (d < minDist) { minDist = d; targetSurvivor = s; }
                     }
                 });
+                // Alcance de persecucion por tipo (mults definidos arriba).
+                const chaseRange = z.typeKey === 'BASIC' ? 9 : (z.typeKey === 'LARGE' ? 4 : 6);
+                if (z.retarget <= 0) {
+                    z.retarget = 0.7;
+                    z.victim = (targetSurvivor && minDist < chaseRange) ? targetSurvivor : null;
+                    if (!z.focusKey || !ZONES[z.focusKey] || !ZONES[z.focusKey].intact) {
+                        z.focusKey = getNearestActiveShelterKey(z.position);
+                    }
+                    // Ruido: si no hay victima, investiga el estruendo mas cercano.
+                    z.noisePos = null;
+                    if (!z.victim && typeof noiseEvents !== 'undefined') {
+                        let bestN = null, bestD = 30;
+                        noiseEvents.forEach(n => {
+                            const dd = Math.hypot(z.position.x - n.pos.x, z.position.z - n.pos.z);
+                            if (dd < Math.min(bestD, n.radius)) { bestD = dd; bestN = n; }
+                        });
+                        if (bestN) z.noisePos = bestN.pos;
+                    }
+                    z.state = z.victim ? 'CHASE' : (z.noisePos ? 'HUNT' : 'SEEK');
+                }
+                if (z.victim && (z.victim.health <= 0 || z.victim.onTower)) z.victim = null;
+                const victim = z.victim || ((targetSurvivor && minDist < chaseRange) ? targetSurvivor : null);
 
-                // Contacto cercano: defensa propia contra el superviviente.
-                if (targetSurvivor && minDist < 6) {
-                    moveTowards(z, targetSurvivor.position, z.speed);
+                // CHASE: contacto cercano con el superviviente (con fin: huye o cae).
+                if (victim && minDist < chaseRange) {
+                    if (typeof taskExpired === 'function' && taskExpired(z, 'chase', TASK_MAX.zombieChase, delta)) {
+                        z.victim = null; z.retarget = 0; // fin: vuelve al asedio
+                    } else {
+                        z.state = 'CHASE';
+                        moveTowards(z, victim.position, z.speed * (z.typeKey === 'BASIC' ? 1.1 : 1));
+                    }
 
                     if (minDist < 1.5 && z.attackCooldown <= 0) {
                         let dmg = z.damage;
-                        if (targetSurvivor.armor > 0) { // el blindaje absorbe la mitad
-                            const absorbed = Math.min(targetSurvivor.armor, dmg * 0.5);
-                            targetSurvivor.armor -= absorbed;
+                        if (victim.armor > 0) { // el blindaje absorbe la mitad
+                            const absorbed = Math.min(victim.armor, dmg * 0.5);
+                            victim.armor -= absorbed;
                             dmg -= absorbed;
                         }
-                        targetSurvivor.health -= dmg;
+                        victim.health -= dmg;
                         z.attackCooldown = 1.2;
-                        createBloodParticle(targetSurvivor.position);
+                        createBloodParticle(victim.position);
 
-                        if (targetSurvivor.health <= 0) {
-                            targetSurvivor.health = 0;
-                            addLogEvent(`¡${targetSurvivor.name} ha caído en combate!`);
+                        if (victim.health <= 0) {
+                            victim.health = 0;
+                            z.victim = null; z.state = 'SEEK'; // fin: objetivo caido
+                            addLogEvent(`¡${victim.name} ha caído en combate!`);
                             if (typeof updateReinforceButton === 'function') updateReinforceButton();
                         }
                         updateUI();
                     }
                 } else {
-                    // Torre en el camino: la horda la golpea
-                    const tw = nearestTower(z.position, 3.5, false);
+                    // Torre COMPLETA en el camino (las obras en construccion se
+                    // conservan: persisten durante la horda y se reanudan despues).
+                    const tw = nearestTower(z.position, 3.5, true);
                     if (tw && z.attackCooldown <= 0) {
-                        tw.health -= z.damage * 0.8;
-                        z.attackCooldown = 1.4;
-                        z.isMoving = false;
-                        aimTowards(z, tw.pos);
-                        createMuzzleFlash(tw.pos, 0x92400e, 0.08);
-                        if (tw.health <= 0) destroyTower(tw);
+                        // Watchdog: no martillar la misma torre sin fin.
+                        const tKey = 'tw' + tw.id;
+                        if (typeof taskExpired === 'function' && taskExpired(z, tKey, TASK_MAX.zombieAttack, delta)) {
+                            z.retarget = 0; // fin: re-evalua otro objetivo
+                        } else {
+                            z.state = 'SIEGE';
+                            tw.health -= z.damage * 0.8 * siegeMult;
+                            z.attackCooldown = 1.4;
+                            z.isMoving = false;
+                            aimTowards(z, tw.pos);
+                            createMuzzleFlash(tw.pos, 0x92400e, 0.08);
+                            if (tw.health <= 0) { destroyTower(tw); z.retarget = 0; }
+                            animateEntityLimbs(z, delta);
+                            continue;
+                        }
+                    }
+                    // HUNT: investiga el ultimo estruendo si no hay otra presa.
+                    if (!z.focusKey && z.noisePos && (!targetSurvivor || minDist > chaseRange)) {
+                        z.state = 'HUNT';
+                        moveTowards(z, z.noisePos, z.speed);
+                        if (z.position.distanceTo(z.noisePos) < 3) z.noisePos = null; // fin: llego
                         animateEntityLimbs(z, delta);
                         continue;
                     }
-                    const nearestShelterKey = getNearestActiveShelterKey(z.position);
+                    const nearestShelterKey = z.focusKey && ZONES[z.focusKey] && ZONES[z.focusKey].intact
+                        ? z.focusKey : getNearestActiveShelterKey(z.position);
                     if (!nearestShelterKey) {
-                        // Sin refugio: ahora si persigue supervivientes.
-                        if (targetSurvivor) moveTowards(z, targetSurvivor.position, z.speed);
-                        else { animateEntityLimbs(z, delta); continue; }
+                        // WANDER: sin refugio ni victima, deriva al centro y reagrupa.
+                        if (targetSurvivor) {
+                            z.state = 'CHASE';
+                            moveTowards(z, targetSurvivor.position, z.speed);
+                        } else {
+                            z.state = 'WANDER';
+                            const drift = new THREE.Vector3(Math.sin(z.animPhase * 0.3) * 30, 0, Math.cos(z.animPhase * 0.23) * 30);
+                            moveTowards(z, drift, z.speed * 0.6);
+                        }
+                        animateEntityLimbs(z, delta);
+                        continue;
                     } else {
+                        z.focusKey = nearestShelterKey;
                         const targetZone = ZONES[nearestShelterKey];
 
-                        moveTowards(z, targetZone.pos, z.speed);
+                        z.state = 'SEEK';
+                        moveTowards(z, personalSlot(targetZone.pos, z, 6), z.speed);
                         const distToBase = z.position.distanceTo(targetZone.pos);
 
                         if (distToBase < targetZone.radius && z.attackCooldown <= 0) {
-                            targetZone.health = Math.max(0, targetZone.health - 1.5);
+                            z.state = 'SIEGE'; // fin del viaje: asedia
+                            targetZone.health = Math.max(0, targetZone.health - 1.5 * siegeMult);
                             z.attackCooldown = 1.5;
 
                             if (targetZone.health <= 0) {
                                 overrunShelter(nearestShelterKey);
+                                z.focusKey = null; z.state = 'SEEK'; // fin: a por el siguiente
                             }
                             updateUI();
                         }
@@ -1708,12 +1832,23 @@
                     }
                 }
             }
-            for (let i = towers.length - 1; i >= 0; i--) {
-                if (towers[i].zoneKey === zoneKey) {
-                    scene.remove(towers[i].mesh);
-                    if (typeof unregisterColliderForRef === 'function') unregisterColliderForRef(towers[i]);
-                    towers.splice(i, 1);
+            // Las torres SE CONSERVAN aunque caiga el refugio: la obra persiste
+            // durante la horda y se reanuda al terminar (no se pierde progreso).
+            // Solo se desaloja a sus ocupantes a otro refugio.
+            towers.forEach(t => {
+                if (t.zoneKey === zoneKey) {
+                    t.occupants.slice().forEach(s => {
+                        s.onTower = null;
+                        s.position.y = 0;
+                        if (s.health > 0 && activeShelterKeys[0] && ZONES[activeShelterKeys[0]]) {
+                            s.homeZoneKey = activeShelterKeys[0];
+                        }
+                    });
+                    t.occupants.length = 0;
                 }
+            });
+            if (towers.some(t => t.zoneKey === zoneKey)) {
+                addLogEvent(`Las torres de ${zone.name} resisten: la obra se reanudará tras la horda.`);
             }
             if (typeof shelterLevels !== 'undefined') delete shelterLevels[zoneKey];
             if (typeof customShelters !== 'undefined') delete customShelters[zoneKey];
