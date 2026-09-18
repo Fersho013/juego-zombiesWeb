@@ -148,6 +148,9 @@
             activeShelterKeys.forEach(k => {
                 ZONES[k].health = Math.min(100, ZONES[k].health + 18);
             });
+            if (typeof mostDamagedShelter === 'function' && mostDamagedShelter()) {
+                addLogEvent('Hay daños en refugios: los supervivientes comenzaran a reconstruir.');
+            }
 
             // Reasignar a la defensa (por si quedaron en huida) a los supervivientes vivos
             survivors.forEach(s => {
