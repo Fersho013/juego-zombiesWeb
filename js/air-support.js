@@ -316,9 +316,10 @@ function createSurvivorBarricade(x, z, fromAir) {
     scene.add(bar);
     const rec = { mesh: bar, health: 120, maxHealth: 120, position: bar.position, owner: null, builtBy: fromAir ? 'Apoyo aereo' : 'Supervivientes', spiked: false };
     barricades.push(rec);
-    if (typeof registerCollider === 'function') registerCollider(rec.position, 1.6, rec, 'barricade', false);
+    if (typeof registerCollider === 'function') registerCollider(rec.position, 1.3, rec, 'barricade', false);
     return rec;
 }
+
 // Barricada con pinchos (individual): mas HP y devuelve daño al atacante.
 function createSpikeBarricade(x, z, owner) {
     const grp = new THREE.Group();
@@ -339,7 +340,7 @@ function createSpikeBarricade(x, z, owner) {
     scene.add(grp);
     const rec = { mesh: grp, health: 160, maxHealth: 160, position: grp.position, owner: owner || null, builtBy: 'Supervivientes', spiked: true };
     barricades.push(rec);
-    if (typeof registerCollider === 'function') registerCollider(rec.position, 1.6, rec, 'barricade', false);
+    if (typeof registerCollider === 'function') registerCollider(rec.position, 1.3, rec, 'barricade', false);
     return rec;
 }
 
@@ -590,7 +591,8 @@ function createTowerSite(zoneKey, x, z, roof) {
         zoneKey: zoneKey, progress: 0, complete: false,
         health: 200, maxHealth: 200, occupants: [], roof: !!roof
     };
-    if (typeof registerCollider === 'function') registerCollider(tower.pos, 2.2, tower, 'tower', false);
+    // Hitbox táctil: tocar cualquier parte (1.3) basta para construir (umbral 3.4).
+    if (typeof registerCollider === 'function') registerCollider(tower.pos, 1.3, tower, 'tower', false);
     towers.push(tower);
     showAirBanner('Los supervivientes comenzaron a construir', 'fa-solid fa-tower-observation text-amber-300 text-lg');
     addLogEvent(`Los supervivientes comenzaron a construir una torre junto a ${ZONES[zoneKey].name} (0/${TOWER_WORK_REQUIRED}s).`);
