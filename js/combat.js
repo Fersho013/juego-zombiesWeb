@@ -15,6 +15,7 @@
 
             playSound('gun', w.sound);
             createMuzzleFlash(survivor.position);
+            if (typeof pushNoise === 'function') pushNoise(survivor.position.x, survivor.position.z, 25, 3);
             const origin = survivor.position.clone().add(new THREE.Vector3(0, 1.1, 0));
 
             if (w.pellets) {
@@ -164,6 +165,17 @@
                     s.aiState = 'DEFEND_BASE';
                 }
             });
+
+            // Obras de torre en pausa durante la horda: se reanudan ahora.
+            if (typeof towers !== 'undefined') {
+                const paused = towers.filter(t => !t.complete);
+                paused.forEach(t => {
+                    const zn = (typeof ZONES !== 'undefined' && ZONES[t.zoneKey]) ? ZONES[t.zoneKey].name : t.zoneKey;
+                    addLogEvent(`Obra reanudada: torre ${t.id} junto a ${zn} (${Math.floor(t.progress)}/${TOWER_WORK_REQUIRED}s).`);
+                });
+                if (paused.length) showToast(`Obras reanudadas: ${paused.length} torre(s) en curso.`);
+            }
+            if (typeof updateNoises === 'function') noiseEvents.length = 0;
 
             // REFUERZOS POST-OLEADA: helicoptero deja exactamente los faltantes (1-4).
             const deadCount = survivors.filter(s => s.health <= 0).length;
