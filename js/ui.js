@@ -134,15 +134,6 @@
                     aliveIds.push('shelter-repair-bar');
                 }
             }
-            // Muros dañados de casas-refugio
-            if (typeof walls !== 'undefined') {
-                walls.filter(w => w.health < w.maxHealth).slice(0, 6).forEach((w, i) => {
-                    const pct = Math.max(0, Math.round(w.health / w.maxHealth * 100));
-                    structureBar(wrap, `wall-bar-${w.shelterKey}-${i}`, `Muro ${ZONES[w.shelterKey].name}`,
-                        '<i class="fa-solid fa-house-chimney text-sky-300 mr-1"></i>', pct, `${pct}%`);
-                    aliveIds.push(`wall-bar-${w.shelterKey}-${i}`);
-                });
-            }
             Array.from(wrap.children).forEach(ch => {
                 if (!aliveIds.includes(ch.id)) wrap.removeChild(ch);
             });
