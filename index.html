@@ -167,38 +167,6 @@
                         <div class="text-[10px] text-slate-400">Heli transporta y suelta muro</div>
                     </div>
                 </button>
-
-                <!-- Mandar refuerzos (habilitado cuando el equipo lo solicita) -->
-                <button id="btn-reinforce" onclick="triggerReinforcement()" class="w-full p-2 rounded-2xl bg-slate-900/80 hover:bg-emerald-600/30 border border-slate-700/80 hover:border-emerald-500/50 transition flex items-center gap-2.5 text-left group relative opacity-50 pointer-events-none" disabled>
-                    <div class="w-8 h-8 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0 group-hover:scale-110 transition">
-                        <i class="fa-solid fa-people-group"></i>
-                    </div>
-                    <div class="hidden md:block flex-1">
-                        <div class="text-xs font-bold text-slate-200">Mandar Refuerzos <span id="reinforce-status" class="text-emerald-300 font-black text-[10px]">sin bajas</span></div>
-                        <div class="text-[10px] text-slate-400">Heli trae los faltantes</div>
-                    </div>
-                </button>
-
-                <!-- Llamar reclutas extra (desde 3 refugios: 7/9/11...50) -->
-                <button id="btn-recruit" onclick="recruitExtraSurvivors()" class="w-full p-2 rounded-2xl bg-slate-900/80 hover:bg-cyan-600/30 border border-slate-700/80 hover:border-cyan-500/50 transition flex items-center gap-2.5 text-left group relative opacity-50 pointer-events-none" disabled>
-                    <div class="w-8 h-8 rounded-xl bg-cyan-500/20 text-cyan-400 flex items-center justify-center shrink-0 group-hover:scale-110 transition">
-                        <i class="fa-solid fa-user-plus"></i>
-                    </div>
-                    <div class="hidden md:block flex-1">
-                        <div class="text-xs font-bold text-slate-200">Llamar Reclutas <span id="recruit-status" class="text-cyan-300 font-black text-[10px]">5/5</span></div>
-                        <div class="text-[10px] text-slate-400">+2 por vez desde 3 refugios</div>
-                    </div>
-                </button>
-            </div>
-
-            <!-- Solicitudes del equipo ("El superviviente necesita...") -->
-            <div class="hidden md:block mt-3 border-t border-slate-800 pt-2.5">
-                <h3 class="text-[10px] font-extrabold uppercase tracking-wider text-emerald-400 mb-2">
-                    <i class="fa-solid fa-hand-holding-heart mr-1"></i> Solicitudes del equipo
-                </h3>
-                <div id="team-requests" class="space-y-1 text-[10px] text-slate-300">
-                    <div class="text-slate-500 italic">El equipo aún no solicita ayuda...</div>
-                </div>
             </div>
 
             <!-- Refugios Activos (soporta múltiples refugios simultáneos) -->
@@ -387,7 +355,6 @@
     <script src="js/ai.js"></script>
     <script src="js/air-support.js"></script>
     <script src="js/combat.js"></script>
-    <script src="js/requests.js"></script>
     <script src="js/ui.js"></script>
     <script src="js/main.js"></script>
 </body>
