@@ -294,6 +294,7 @@
                     }
                 }
 
+                if (typeof syncHandTool === 'function') syncHandTool(s); // mazo <=> arma
                 animateEntityLimbs(s, delta);
             });
 
