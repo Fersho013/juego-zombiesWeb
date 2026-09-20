@@ -285,14 +285,14 @@
             const armR = makeLimb(false, 0.42);
             group.add(legL, legR, armL, armR);
 
-            // Arma visible en el brazo derecho (solo supervivientes; se reemplaza
-            // por el modelo fisico del arma equipada con refreshWeaponMesh)
+            // Arma en la MANO derecha (hija del brazo: acompaña su animacion).
+            // Se reemplaza por el modelo fisico del arma equipada con refreshWeaponMesh.
             let gun = null;
             if (withGun) {
                 gun = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.15, 0.6), new THREE.MeshStandardMaterial({ color: 0x1e293b }));
-                gun.position.set(0.22, 1.1, 0.35);
+                gun.position.set(0, -0.62, 0.12);
                 gun.name = 'hand-weapon';
-                group.add(gun);
+                armR.add(gun);
             }
 
             return { group, limbs: { legL, legR, armL, armR }, head, torso };
@@ -330,18 +330,51 @@
                 part(new THREE.BoxGeometry(0.11, 0.13, 0.4), dark, 0, 0, 0);
                 part(new THREE.BoxGeometry(0.09, 0.2, 0.1), dark, 0, -0.13, -0.12);
             }
-            g.position.set(0.22, 1.1, 0.35);
+            // Sin posicion absoluta: el dueño la coloca en la mano (pivote armR)
             return g;
         }
 
         function refreshWeaponMesh(survivor) {
-            if (!survivor || !survivor.mesh) return;
+            if (!survivor || !survivor.mesh || !survivor.limbs) return;
             const old = survivor.mesh.getObjectByName('hand-weapon');
-            if (old) survivor.mesh.remove(old);
+            if (old && old.parent) old.parent.remove(old);
             const w = createWeaponMesh(survivor.primary || 'PISTOL');
             w.name = 'hand-weapon';
-            survivor.mesh.add(w);
+            w.position.set(0, -0.62, 0.12); // mano derecha, canon al frente
+            survivor.limbs.armR.add(w);
             survivor.weaponMesh = w;
+            survivor.malletOn = false;
+        }
+
+        // Mini mazo de obra: reemplaza momentaneamente al arma al martillar
+        function createMalletMesh() {
+            const g = new THREE.Group();
+            const wood = new THREE.MeshStandardMaterial({ color: 0x92600f, roughness: 0.9 });
+            const steel = new THREE.MeshStandardMaterial({ color: 0x64748b, metalness: 0.7, roughness: 0.35 });
+            const handle = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.45, 0.07), wood);
+            handle.position.set(0, -0.12, 0.05);
+            handle.castShadow = true;
+            const head = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.14, 0.14), steel);
+            head.position.set(0, -0.34, 0.05);
+            head.castShadow = true;
+            g.add(handle, head);
+            return g;
+        }
+
+        // Sincroniza herramienta en mano: mazo al construir, arma al terminar
+        function syncHandTool(s) {
+            if (!s.mesh || !s.limbs) return;
+            if (s.hammering && !s.malletOn) {
+                const old = s.mesh.getObjectByName('hand-weapon');
+                if (old && old.parent) old.parent.remove(old);
+                const m = createMalletMesh();
+                m.name = 'hand-weapon';
+                m.position.set(0, -0.62, 0.12);
+                s.limbs.armR.add(m);
+                s.malletOn = true;
+            } else if (!s.hammering && s.malletOn) {
+                refreshWeaponMesh(s); // restaura el arma (y baja malletOn)
+            }
         }
 
         // Casa-refugio de 4 muros (puertas + ventanas): cada muro es barricada con HP
