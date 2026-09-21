@@ -78,7 +78,7 @@
         }
 
         function updateCooldownButtons() {
-            const map = { airdrop: 'airdrop', artillery: 'artillery', adrenaline: 'adrenaline', barricade: 'barricade' };
+            const map = { airdrop: 'airdrop', artillery: 'artillery', adrenaline: 'adrenaline', barricade: 'barricade', materials: 'materials' };
             Object.keys(map).forEach(type => {
                 const btn = document.getElementById(`btn-interv-${type}`);
                 const label = document.getElementById(`cd-${type}`);
