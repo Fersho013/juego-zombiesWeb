@@ -76,6 +76,7 @@ function init3DWorld() {
             spawnInitialCrates();
             initSurvivors();
             activateShelter('MALL', true); // Refugio inicial gratuito
+            if (typeof createDepot === 'function') createDepot('MALL'); // gran deposito del spawn
 
             // Resize listener
             window.addEventListener('resize', onWindowResize);
