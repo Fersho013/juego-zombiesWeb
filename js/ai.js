@@ -191,6 +191,7 @@
                 // (los francotiradores en torre no abandonan su puesto para curar)
                 let healBusy = false;
                 if (s.aiState !== 'FLEE' && !s.onTower) healBusy = updateSurvivorHeal(s, delta);
+                if (healBusy) s.task = 'curar'; // individual prioritaria
 
                 if (isWaveActive) {
                     const homeZone = ZONES[s.homeZoneKey] && ZONES[s.homeZoneKey].intact ? ZONES[s.homeZoneKey] : ZONES[activeShelterKeys[0] || 'MALL'];
@@ -208,6 +209,7 @@
 
                     if (s.aiState === 'FLEE') {
                         if (s.onTower) dismountTower(s); // abandona la torre para huir
+                        s.task = 'huir';
                         s.thoughtText = '¡Replegándonos, nos superan en número!';
                         moveTowards(s, s.fleeTarget, 0.155);
                         const arrived = s.position.distanceTo(s.fleeTarget) < 3;
@@ -230,6 +232,7 @@
                         // Puesto de francotirador en torre si hay sitio libre
                         if (!updateTowerOccupy(s, homeZone)) {
                             s.aiState = 'DEFEND_BASE';
+                            s.task = 'defender';
                             s.thoughtText = `Defendiendo ${homeZone.name}`;
                             const defPos = homeZone.pos.clone().add(new THREE.Vector3(Math.cos(s.id * 1.7) * homeZone.radius * 0.4, 0, Math.sin(s.id * 1.7) * homeZone.radius * 0.4));
                             if (s.position.distanceTo(defPos) > 2) {
@@ -239,6 +242,7 @@
                             }
                         } else {
                             s.aiState = 'DEFEND_BASE';
+                            s.task = s.onTower ? 'vigilar' : 'defender';
                         }
                     } else {
                         s.aiState = 'DEFEND_BASE';
@@ -251,6 +255,7 @@
                     if (healBusy) {
                         // Curando a un aliado: sin otras tareas este frame
                     } else if (s.carriedCrate) {
+                        s.task = 'transportar';
                         s.thoughtText = `Transportando ${s.carriedCrate.config.name} a Base`;
                         const distToBase = s.position.distanceTo(homeZone.pos);
 
@@ -265,6 +270,7 @@
                         }
 
                         if (s.targetCrate) {
+                            s.task = 'recolectar'; // individual
                             s.thoughtText = `Recolectando ${s.targetCrate.config.name}`;
                             const distToCrate = s.position.distanceTo(s.targetCrate.position);
 
@@ -274,18 +280,19 @@
                                 moveTowards(s, s.targetCrate.position, 0.11);
                             }
                         } else {
-                            // Sin cajas: reparar, fundar refugio, barricada y al ultimo la torre
+                            // Orden: individuales (barricada, reparar) antes que grupales (fundar, torre)
                             if (maybeCraftSupplyCrate(s)) {
-                                // fabricada este frame
-                            } else if (updateShelterRepair(s, delta)) {
-                                // reconstruyendo refugio este frame
-                            } else if (updateShelterFound(s, delta)) {
-                                // levantando nuevo refugio este frame
+                                s.task = 'fabricar';
                             } else if (updateSurvivorBuild(s, delta, homeZone)) {
-                                // construyendo barricada este frame
+                                s.task = 'barricada'; // individual
+                            } else if (updateShelterRepair(s, delta)) {
+                                s.task = 'reparar'; // individual (mejorar refugio)
+                            } else if (updateShelterFound(s, delta)) {
+                                s.task = 'fundar'; // grupal
                             } else if (updateTowerWork(s, delta, homeZone)) {
-                                // trabajando en la torre este frame
+                                s.task = 'torre'; // grupal
                             } else {
+                                s.task = 'patrullar';
                                 s.thoughtText = "Patrullando perímetro...";
                                 const patrolPos = homeZone.pos.clone().add(new THREE.Vector3(Math.cos(s.id + clock.getElapsedTime() * 0.5) * 10, 0, Math.sin(s.id + clock.getElapsedTime() * 0.5) * 10));
                                 moveTowards(s, patrolPos, 0.08);
@@ -413,6 +420,25 @@
                 if (d < minDist) { minDist = d; closest = c; }
             });
             return closest;
+        }
+
+        // ==========================================================
+        // ARBITRO DE TAREAS: individuales primero, luego grupales.
+        // Individuales (uno las completa solo): recolectar, barricada, reparar.
+        // Grupales (progreso compartido): fundar refugio, construir torre.
+        // ==========================================================
+        function anyFreeCrate(self) {
+            for (const c of crates) {
+                if (!c.isPickedUp && !isCrateReserved(c, self)) return true;
+            }
+            return false;
+        }
+
+        function individualWorkPending(s) {
+            if (anyFreeCrate(s)) return true; // recolectar
+            if (countOwnBarricades(s) < BARRICADES_PER_SURVIVOR && baseResources.ammo >= 1) return true; // barricada/muro
+            if (mostDamagedShelter()) return true; // mejorar/reparar refugio
+            return false;
         }
 
         function pickupCrate(survivor, crate) {
@@ -649,6 +675,7 @@
         // Las torres son obra del refugio PRINCIPAL.
         function updateTowerWork(s, delta, homeZone) {
             if (isWaveActive) return false;
+            if (individualWorkPending(s)) return false; // grupal espera a lo individual
             const mainZone = (ZONES[mainShelterKey] && ZONES[mainShelterKey].isActiveShelter) ? ZONES[mainShelterKey] : homeZone;
             const mainKey = mainZone.key;
             if (countCompleteTowers() + (findTowerSite() ? 1 : 0) >= TOWER_MAX && !findTowerSite()) return false;
@@ -777,6 +804,7 @@
         // Fundar refugio en la zona libre que mejor venga (recursos + obra 120s)
         function updateShelterFound(s, delta) {
             if (isWaveActive) return false;
+            if (individualWorkPending(s)) return false; // grupal espera a lo individual
             const aliveCount = survivors.filter(o => o.health > 0).length;
             if (aliveCount < 3 || activeShelterKeys.length >= 4) return false;
             if (!shelterFounder) {
