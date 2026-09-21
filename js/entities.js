@@ -354,13 +354,13 @@
             survivor.malletOn = false;
         }
 
-        // Martillo de uña: mango en puño y CABEZA con la cara (#5) al frente.
-        // La cara es el disco plano que mira +z (hacia la obra) para golpear con ella.
+        // Mazo de madera como el de referencia: mango dorado largo y cabezal
+        // cilindrico gris oscuro con las caras planas al frente/atras.
+        // Al martillar, el arco del brazo lleva la cara frontal contra la obra.
         function createMalletMesh() {
             const g = new THREE.Group();
-            const wood = new THREE.MeshStandardMaterial({ color: 0x92600f, roughness: 0.9 });
-            const steel = new THREE.MeshStandardMaterial({ color: 0x9ca3af, metalness: 0.8, roughness: 0.3 });
-            const darkSteel = new THREE.MeshStandardMaterial({ color: 0x4b5563, metalness: 0.7, roughness: 0.4 });
+            const gold = new THREE.MeshStandardMaterial({ color: 0xd9a021, roughness: 0.7 });
+            const darkWood = new THREE.MeshStandardMaterial({ color: 0x374151, roughness: 0.75 });
             function mpart(geo, mat, x, y, z, rx) {
                 const m = new THREE.Mesh(geo, mat);
                 m.position.set(x, y, z);
@@ -369,14 +369,12 @@
                 g.add(m);
                 return m;
             }
-            // Mango: continua el brazo hacia abajo desde el puño (origen = puño)
-            mpart(new THREE.BoxGeometry(0.07, 0.5, 0.07), wood, 0, -0.25, 0);
-            // Cabeza: campana cilindrica con la CARA plana mirando +z (al frente)
-            mpart(new THREE.CylinderGeometry(0.10, 0.10, 0.14, 12), steel, 0, -0.50, 0.08, Math.PI / 2);
-            // Cuello entre mango y campana
-            mpart(new THREE.BoxGeometry(0.08, 0.08, 0.16), darkSteel, 0, -0.50, -0.06);
-            // Uña trasera (lado opuesto a la cara)
-            mpart(new THREE.BoxGeometry(0.07, 0.07, 0.22), darkSteel, 0, -0.46, -0.24);
+            // Mango dorado: continua el brazo hacia abajo desde el puño (origen = puño)
+            mpart(new THREE.CylinderGeometry(0.045, 0.05, 0.55, 8), gold, 0, -0.28, 0);
+            // Cabezal: cilindro robusto oscuro, caras planas mirando +z/-z
+            mpart(new THREE.CylinderGeometry(0.16, 0.16, 0.30, 12), darkWood, 0, -0.58, 0.04, Math.PI / 2);
+            // Collera donde el mango entra al cabezal
+            mpart(new THREE.CylinderGeometry(0.06, 0.06, 0.12, 8), gold, 0, -0.52, 0.01);
             return g;
         }
 
