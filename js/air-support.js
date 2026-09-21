@@ -175,12 +175,12 @@ function heliAttackStep(u, delta) {
     }
 }
 
-function fireMissile(from, targetPos) {
+function fireMissile(from, targetPos, dmg, radius) {
     const mesh = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.18, 1.6, 8),
         new THREE.MeshBasicMaterial({ color: 0xf97316 }));
     mesh.position.copy(from);
     scene.add(mesh);
-    missiles.push({ mesh: mesh, from: from.clone(), to: targetPos.clone().add(new THREE.Vector3(0, 0.5, 0)), t: 0, dur: 1.1 });
+    missiles.push({ mesh: mesh, from: from.clone(), to: targetPos.clone().add(new THREE.Vector3(0, 0.5, 0)), t: 0, dur: 1.1, dmg: dmg || 130, radius: radius || 13 });
 }
 
 function updateMissiles(delta) {
@@ -190,7 +190,7 @@ function updateMissiles(delta) {
         if (m.t >= 1) {
             scene.remove(m.mesh);
             missiles.splice(i, 1);
-            explodeAt(m.to, 13, 130, null); // mismo daño que artilleria anterior
+            explodeAt(m.to, m.radius || 13, m.dmg || 130, null); // mismo daño que artilleria anterior
             if (zombiesAliveCount === 0 && isWaveActive) endWaveSuccess();
             updateUI();
         } else {
@@ -435,6 +435,8 @@ function updateAirSupport(delta) {
     updateLoot(dt);
     updateHealFX(dt);
     updateTowerTurrets(dt);
+    updateTankTurrets(dt);
+    updateTank(dt);
 }
 
 // ==========================================================
@@ -514,8 +516,8 @@ function collectLoot(s, loot) {
         s.thoughtText = 'Botiquin aplicado (+25 salud)';
         addLogEvent(`${s.name} uso un botiquin saqueado (+25 salud).`);
     } else if (loot.kind === 'DEBRIS') {
-        s.debris = Math.min(DEBRIS_CAP, (s.debris || 0) + 20);
-        s.thoughtText = 'Escombros recogidos (+20)';
+        baseResources.debris = Math.min(DEPOT_DEBRIS_CAP, (baseResources.debris || 0) + 20);
+        s.thoughtText = 'Escombros al deposito (+20)';
     } else if (loot.kind === 'FLARE') {
         s.flares = Math.min(3, (s.flares || 0) + 1);
         s.thoughtText = 'Bengala recogida';
@@ -657,6 +659,234 @@ function finishTower(tower) {
     addLogEvent(`¡Torre ${tower.id} completada! Torreta lanzamisiles + puesto de francotirador listos.`);
     updateUI();
 }
+
+        // ==========================================================
+        // TANQUE: malla, emplazamientos, ensamblaje y combate
+        // ==========================================================
+        const TANK_TURRET_STATS = {
+            RAPID: { range: 34, cd: 0.12 }, // cada bala = dmg de francotirador
+            MISSILES: { range: 30, cd: 1.4 }, // rafaga de 3, triple de granada
+            GRENADES: { range: 26, cd: 1.4 } // 5 minis, area reducida, mismo dmg
+        };
+
+        function createTankMesh() {
+            const g = new THREE.Group();
+            const olive = new THREE.MeshStandardMaterial({ color: 0x4d5c2a, roughness: 0.7, metalness: 0.35 });
+            const darkMetal = new THREE.MeshStandardMaterial({ color: 0x1f2937, metalness: 0.6, roughness: 0.4 });
+            const accent = new THREE.MeshStandardMaterial({ color: 0xef4444, metalness: 0.5, roughness: 0.4 });
+            function tpart(geo, mat, x, y, z, ry) {
+                const m = new THREE.Mesh(geo, mat);
+                m.position.set(x, y, z);
+                if (ry) m.rotation.y = ry;
+                m.castShadow = true;
+                g.add(m);
+                return m;
+            }
+            tpart(new THREE.BoxGeometry(5, 1.6, 7), olive, 0, 1.4, 0); // casco
+            tpart(new THREE.BoxGeometry(5.6, 0.9, 2.0), darkMetal, -2.9, 0.7, 0); // oruga izq
+            tpart(new THREE.BoxGeometry(5.6, 0.9, 2.0), darkMetal, 2.9, 0.7, 0); // oruga der
+            tpart(new THREE.BoxGeometry(3.2, 0.8, 3.4), olive, 0, 2.5, -0.5); // torreta central
+            tpart(new THREE.BoxGeometry(1.2, 0.7, 1.2), accent, -1.6, 2.9, 1.2); // torreta rapida
+            tpart(new THREE.BoxGeometry(1.2, 0.7, 1.2), darkMetal, 1.6, 2.9, 1.2); // torreta misiles
+            tpart(new THREE.BoxGeometry(1.2, 0.7, 1.2), olive, 0, 2.9, 1.8); // torreta granadas
+            const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 3.2, 8), darkMetal);
+            barrel.rotation.x = Math.PI / 2;
+            barrel.position.set(0, 2.5, -3.6);
+            g.add(barrel);
+            tpart(new THREE.BoxGeometry(0.9, 0.5, 0.9), darkMetal, 0, 3.1, -0.5); // escotilla (ventana)
+            const lampL = new THREE.Mesh(new THREE.SphereGeometry(0.15, 6, 6), new THREE.MeshBasicMaterial({ color: 0xfde68a }));
+            lampL.position.set(-1.5, 1.2, -3.55);
+            const lampR = lampL.clone();
+            lampR.position.x = 1.5;
+            g.add(lampL, lampR);
+            return g;
+        }
+
+        // Pieza de torreta lista: emplazamiento automatico junto al refugio principal
+        function deployEmplacement(typeKey) {
+            const zone = (ZONES[mainShelterKey] && ZONES[mainShelterKey].isActiveShelter) ? ZONES[mainShelterKey] : ZONES[activeShelterKeys[0]];
+            if (!zone) return;
+            const i = tank.emplacements.length;
+            const ang = (i / 3) * Math.PI * 2 + 0.5;
+            const px = zone.pos.x + Math.cos(ang) * (zone.radius + 5);
+            const pz = zone.pos.z + Math.sin(ang) * (zone.radius + 5);
+            const built = createTurretModel(false);
+            built.mesh.scale.setScalar(1.4);
+            built.mesh.position.set(px, 0, pz);
+            scene.add(built.mesh);
+            const ring = new THREE.Mesh(new THREE.RingGeometry(1.6, 2.1, 20),
+                new THREE.MeshBasicMaterial({ color: 0xfacc15, side: THREE.DoubleSide, transparent: true, opacity: 0.55 }));
+            ring.rotation.x = -Math.PI / 2;
+            ring.position.set(px, 0.05, pz);
+            scene.add(ring);
+            tank.emplacements.push({ mesh: built.mesh, ring: ring, head: built.headGroup, type: typeKey, cooldown: 0, pos: new THREE.Vector3(px, 0, pz) });
+            addLogEvent(`Emplazamiento operativo: ${TANK_PARTS.find(p => p.key === typeKey).label}. Los defensores lo prefieren.`);
+        }
+
+        function nearestEmplacement(pos) {
+            let best = null, bestD = Infinity;
+            tank.emplacements.forEach(e => {
+                const d = pos.distanceTo(e.pos);
+                if (d < bestD) { bestD = d; best = e; }
+            });
+            return best;
+        }
+
+        function updateTankTurrets(dt) {
+            const g = dt * Math.max(0.001, gameSpeed);
+            tank.emplacements.forEach(e => {
+                e.cooldown = Math.max(0, e.cooldown - g);
+                const st = TANK_TURRET_STATS[e.type];
+                if (!st) return;
+                const tgt = nearestZombieOfClass(e.pos, st.range, ['BASIC', 'MEDIUM', 'LARGE']);
+                if (!tgt) return;
+                const dx = tgt.position.x - e.pos.x, dz = tgt.position.z - e.pos.z;
+                e.head.rotation.y += (Math.atan2(dx, dz) - e.head.rotation.y) * Math.min(1, g * 5);
+                // Bonus de dotacion: superviviente al pie acelera el disparo
+                let rate = st.cd;
+                for (const s of survivors) {
+                    if (s.health > 0 && s.position.distanceTo(e.pos) < 3.5) { rate *= 0.66; break; }
+                }
+                if (e.cooldown > 0) return;
+                e.cooldown = rate;
+                const top = e.pos.clone().add(new THREE.Vector3(0, 1.6, 0));
+                if (e.type === 'RAPID') {
+                    spawnProjectile(top, tgt, 70 + Math.floor(Math.random() * 40), 85, 0xfacc15);
+                    createMuzzleFlash(e.pos, 0xfde68a, 0.06);
+                    playSound('turret', 'G3');
+                } else if (e.type === 'MISSILES') {
+                    for (let k = 0; k < 3; k++) {
+                        const off = new THREE.Vector3((Math.random() - 0.5) * 3, 0, (Math.random() - 0.5) * 3);
+                        fireMissile(top, tgt.position.clone().add(off), 255, 8); // triple de granada
+                    }
+                    playSound('explosion');
+                } else if (e.type === 'GRENADES') {
+                    for (let k = 0; k < 5; k++) {
+                        const off = new THREE.Vector3((Math.random() - 0.5) * 6, 0, (Math.random() - 0.5) * 6);
+                        explodeAt(tgt.position.clone().add(off), 4, 85, null);
+                    }
+                    playSound('explosion');
+                }
+            });
+        }
+
+        function assembleTank() {
+            const yard = tank.yard ? tank.yard.clone() : new THREE.Vector3();
+            yard.y = 0;
+            const mesh = createTankMesh(); // primero construir: si falla, el estado queda intacto
+            mesh.position.copy(yard);
+            scene.add(mesh);
+            tank.emplacements.forEach(e => { scene.remove(e.mesh); scene.remove(e.ring); });
+            tank.emplacements = [];
+            tank.unit = {
+                mesh: mesh, pos: yard, heading: 0, hp: TANK_HP, armor: TANK_ARMOR,
+                roles: {}, crewed: false, cd: { rapid: 0, missiles: 0, grenades: 0 }, moving: false
+            };
+            tank.build = null;
+            survivors.forEach(s => { s.tankCommitted = false; });
+            showAirBanner('¡TANQUE COMPLETADO!', 'fa-solid fa-truck-monster text-amber-300 text-lg');
+            addLogEvent('¡TANQUE COMPLETADO! 5 piezas ensambladas: a abordar en la proxima horda.');
+            showToast('Tanque listo para la batalla.');
+            updateUI();
+        }
+
+        // Caza agresiva del tanque tripulado: piloto + 3 torretas + ventana
+        function updateTank(dt) {
+            const T = tank.unit;
+            if (!T) return;
+            const g = dt * Math.max(0.001, gameSpeed);
+            const roleList = [T.roles.driver, T.roles.rapid, T.roles.missiles, T.roles.grenades, T.roles.window].filter(Boolean);
+            const aliveCrew = roleList.filter(s => s.health > 0);
+            if (T.crewed && aliveCrew.length === 0) T.crewed = false; // tripulacion perdida
+            // Relevo al volante si el piloto cayo
+            if (T.crewed && (!T.roles.driver || T.roles.driver.health <= 0)) {
+                const cand = [T.roles.rapid, T.roles.missiles, T.roles.grenades, T.roles.window].find(s => s && s.health > 0);
+                if (cand) { T.roles.driver = cand; }
+            }
+            if (!T.crewed) return;
+            // Piloto: a por la horda mas cercana, sin correa ni miedo
+            const prey = nearestZombieOfClass(T.pos, 220, ['BASIC', 'MEDIUM', 'LARGE']);
+            const driver = T.roles.driver;
+            if (prey && driver && driver.health > 0) {
+                const dir = prey.position.clone().sub(T.pos); dir.y = 0;
+                if (dir.length() > 3) {
+                    dir.normalize();
+                    T.pos.addScaledVector(dir, 10 * g);
+                    T.moving = true;
+                    T.heading = Math.atan2(dir.x, dir.z);
+                    driver.thoughtText = '¡Aplastandolos!';
+                } else T.moving = false;
+            } else T.moving = false;
+            T.mesh.position.copy(T.pos);
+            T.mesh.rotation.y = T.heading || 0;
+            // Ruedas: trituran pequeños al pasar por encima
+            if (T.moving) {
+                zombies.slice().forEach(z => {
+                    if (z.health > 0 && !z.dying && z.typeKey === 'BASIC' && z.position.distanceTo(T.pos) < 2.8) {
+                        killZombie(z, driver);
+                        createBloodParticle(z.position);
+                    }
+                });
+            }
+            // Torretas servidas
+            const top = T.pos.clone().add(new THREE.Vector3(0, 3.4, 0));
+            const gunners = { rapid: T.roles.rapid, missiles: T.roles.missiles, grenades: T.roles.grenades };
+            Object.keys(gunners).forEach(k => {
+                const gunner = gunners[k];
+                if (!gunner || gunner.health <= 0) return;
+                gunner.position.copy(T.pos);
+                gunner.mesh.visible = false;
+                gunner.isMoving = T.moving;
+                const st = TANK_TURRET_STATS[k.toUpperCase()];
+                T.cd[k.toLowerCase()] = Math.max(0, T.cd[k.toLowerCase()] - g);
+                const tgt = nearestZombieOfClass(T.pos, st.range, ['BASIC', 'MEDIUM', 'LARGE']);
+                if (!tgt) return;
+                aimTowards(gunner, tgt.position);
+                if (T.cd[k.toLowerCase()] > 0) return;
+                if (k === 'rapid') {
+                    T.cd.rapid = st.cd;
+                    gunner.thoughtText = '¡Cadencia maxima!';
+                    spawnProjectile(top, tgt, 70 + Math.floor(Math.random() * 40), 85, 0xfacc15);
+                    createMuzzleFlash(T.pos, 0xfde68a, 0.06);
+                    playSound('turret', 'G3');
+                } else if (k === 'missiles') {
+                    T.cd.missiles = st.cd;
+                    gunner.thoughtText = '¡Rafaga de misiles fuera!';
+                    for (let m = 0; m < 3; m++) {
+                        const off = new THREE.Vector3((Math.random() - 0.5) * 3, 0, (Math.random() - 0.5) * 3);
+                        fireMissile(top, tgt.position.clone().add(off), 255, 8);
+                    }
+                    playSound('explosion');
+                } else if (k === 'grenades') {
+                    T.cd.grenades = st.cd;
+                    gunner.thoughtText = '¡Lluvia de minis!';
+                    for (let m = 0; m < 5; m++) {
+                        const off = new THREE.Vector3((Math.random() - 0.5) * 6, 0, (Math.random() - 0.5) * 6);
+                        explodeAt(tgt.position.clone().add(off), 4, 85, gunner);
+                    }
+                    playSound('explosion');
+                }
+            });
+            if (driver && driver.health > 0) {
+                driver.position.copy(T.pos);
+                driver.mesh.visible = false;
+                driver.isMoving = T.moving;
+            }
+            // Ventana: el quinto dispara su arma personal
+            const wg = T.roles.window;
+            if (wg && wg.health > 0) {
+                wg.position.set(T.pos.x, 3.0, T.pos.z);
+                wg.mesh.visible = true;
+                wg.isMoving = false;
+                wg.shootCooldown = Math.max(0, wg.shootCooldown - g);
+                const tgt = nearestZombieOfClass(T.pos, 26, ['BASIC', 'MEDIUM', 'LARGE']);
+                if (tgt) {
+                    aimTowards(wg, tgt.position);
+                    wg.thoughtText = '¡Fuego desde la ventana!';
+                    if (wg.shootCooldown <= 0 && wg.ammo > 0) fireSurvivorWeapon(wg, tgt);
+                }
+            }
+        }
 
 function updateTowerTurrets(dt) {
     towers.forEach(tower => {
