@@ -91,7 +91,8 @@
         const TOWER_MAX = 2; // maximo de torres completas en pie
         const TOWER_WORK_REQUIRED = 400; // segundos-trabajador por torre
         const TOWER_HEIGHT = 8.4; // altura de la plataforma
-        const TOWER_HP = 400;
+        const TOWER_HP = 4000; // torres muy duras: asedio largo
+        const TOWER_SITE_HP = 1000; // obra sin terminar, mas fragil
         const BARRICADES_PER_SURVIVOR = 4; // legado: el perimetro compartido lo reemplaza (16 tramos/refugio)
         const LOOT_CHANCE = 0.22; // prob. de que un zombie suelte loot
         const LOOT_DESPAWN = 45; // segundos antes de que el loot caduque
@@ -107,9 +108,18 @@
         let mainShelterKey = 'MALL'; // refugio principal: obras principales
         const walls = []; // muros de casas-refugio {mesh, health, maxHealth, position, shelterKey}
         let shelterFounder = null; // {zoneKey, progress, required}
-        const SHELTER_FOUND_COST = { ammo: 2, food: 1 };
+        const SHELTER_DEBRIS_COST = 30; // fundar refugio en escombro
+        const TOWER_DEBRIS_COST = 15; // fundar obra de torre en escombro
+        const PERIMETER_DEBRIS_COST = 10; // cada tramo del perimetro
         const SHELTER_FOUND_WORK = 120; // segundos-trabajador para levantar la casa
         const WALL_HP = 150;
+        // Dummie bomba + escombros
+        const dummies = []; // {mesh, health, maxHealth, position}
+        const DUMMY_HP = 200;
+        const DUMMY_CAP = 3;
+        const DUMMY_DEBRIS_COST = 20; // + 1 granada del inventario
+        const DUMMY_BUILD_TIME = 4;
+        const DEBRIS_CAP = 100;
         let gameOverActive = false;
         let prevGameSpeed = 1;
 
