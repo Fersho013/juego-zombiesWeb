@@ -280,22 +280,39 @@
                                 moveTowards(s, s.targetCrate.position, 0.11);
                             }
                         } else {
-                            // Orden: individuales (barricada, reparar) antes que grupales (fundar, torre)
-                            if (maybeCraftSupplyCrate(s)) {
-                                s.task = 'fabricar';
-                            } else if (updateSurvivorBuild(s, delta, homeZone)) {
-                                s.task = 'barricada'; // individual
-                            } else if (updateShelterRepair(s, delta)) {
-                                s.task = 'reparar'; // individual (mejorar refugio)
-                            } else if (updateShelterFound(s, delta)) {
-                                s.task = 'fundar'; // grupal
-                            } else if (updateTowerWork(s, delta, homeZone)) {
-                                s.task = 'torre'; // grupal
-                            } else {
-                                s.task = 'patrullar';
-                                s.thoughtText = "Patrullando perímetro...";
-                                const patrolPos = homeZone.pos.clone().add(new THREE.Vector3(Math.cos(s.id + clock.getElapsedTime() * 0.5) * 10, 0, Math.sin(s.id + clock.getElapsedTime() * 0.5) * 10));
-                                moveTowards(s, patrolPos, 0.08);
+                            let handled = false;
+                            // 1) Compromiso grupal vigente: continuar la obra sin abandonar
+                            // (solo horda/cura/huida interrumpen, fuera de esta rama)
+                            if (s.towerCommitted) {
+                                if (updateTowerWork(s, delta, homeZone)) { s.task = 'torre'; handled = true; }
+                                else s.towerCommitted = false;
+                            } else if (s.foundCommitted) {
+                                if (updateShelterFound(s, delta)) { s.task = 'fundar'; handled = true; }
+                                else s.foundCommitted = false;
+                            }
+                            // 2) Rally: obra activa y sin recoleccion urgente -> todos se suman
+                            if (!handled && groupTaskActive() && !anyFreeCrate(s)) {
+                                if (shelterFounder && updateShelterFound(s, delta)) { s.task = 'fundar'; handled = true; }
+                                else if (findTowerSite() && updateTowerWork(s, delta, homeZone)) { s.task = 'torre'; handled = true; }
+                            }
+                            // 3) Individuales y luego nuevas obras grupales
+                            if (!handled) {
+                                if (maybeCraftSupplyCrate(s)) {
+                                    s.task = 'fabricar';
+                                } else if (updateSurvivorBuild(s, delta, homeZone)) {
+                                    s.task = 'barricada'; // individual (tramo del perimetro)
+                                } else if (updateShelterRepair(s, delta)) {
+                                    s.task = 'reparar'; // individual (mejorar refugio)
+                                } else if (updateShelterFound(s, delta)) {
+                                    s.task = 'fundar'; // grupal
+                                } else if (updateTowerWork(s, delta, homeZone)) {
+                                    s.task = 'torre'; // grupal
+                                } else {
+                                    s.task = 'patrullar';
+                                    s.thoughtText = "Patrullando perímetro...";
+                                    const patrolPos = homeZone.pos.clone().add(new THREE.Vector3(Math.cos(s.id + clock.getElapsedTime() * 0.5) * 10, 0, Math.sin(s.id + clock.getElapsedTime() * 0.5) * 10));
+                                    moveTowards(s, patrolPos, 0.08);
+                                }
                             }
                         }
                     }
@@ -423,9 +440,11 @@
         }
 
         // ==========================================================
-        // ARBITRO DE TAREAS: individuales primero, luego grupales.
-        // Individuales (uno las completa solo): recolectar, barricada, reparar.
-        // Grupales (progreso compartido): fundar refugio, construir torre.
+        // ARBITRO DE TAREAS
+        // Individuales: recolectar, barricada/perimetro, reparar.
+        // Grupales (rally de todos, sin abandonar): fundar refugio, construir torre.
+        // Regla: la recoleccion urgente va primero al UNIRSE a una obra;
+        // comprometido a obra grupal no la abandona (solo horda/cura/huida).
         // ==========================================================
         function anyFreeCrate(self) {
             for (const c of crates) {
@@ -434,11 +453,8 @@
             return false;
         }
 
-        function individualWorkPending(s) {
-            if (anyFreeCrate(s)) return true; // recolectar
-            if (countOwnBarricades(s) < BARRICADES_PER_SURVIVOR && baseResources.ammo >= 1) return true; // barricada/muro
-            if (mostDamagedShelter()) return true; // mejorar/reparar refugio
-            return false;
+        function groupTaskActive() {
+            return !!(findTowerSite() || shelterFounder);
         }
 
         function pickupCrate(survivor, crate) {
@@ -507,65 +523,104 @@
             return true;
         }
 
-        // Barricadas en cuadrado defensivo (max 4 vivas por superviviente)
-        const BARRICADE_SQUARE = [[-7, -7], [7, -7], [7, 7], [-7, 7]];
+        // ==========================================================
+        // PERIMETRO COMPARTIDO: cuadrado de barricadas alrededor del refugio.
+        // Los 5 colaboran por tramos: si uno empezo un tramo, otro lo continua
+        // (progreso compartido por tramo; varios martillando aceleran).
+        // ==========================================================
+        const PERIMETER_SPOTS_PER_SIDE = 4;
+        const PERIMETER_BUILD_TIME = 3;
 
-        function countOwnBarricades(s) {
-            let n = 0;
-            barricades.forEach(b => { if (b.owner === s && b.health > 0) n++; });
-            return n;
+        function getPerimeter(zoneKey) {
+            const zone = ZONES[zoneKey];
+            if (!zone || !zone.isActiveShelter) return null;
+            let P = shelterPerimeters[zoneKey];
+            if (!P) {
+                const half = Math.max(10, zone.radius * 0.55);
+                P = { zoneKey: zoneKey, half: half, sides: [] };
+                for (let side = 0; side < 4; side++) {
+                    const spots = [];
+                    for (let i = 0; i < PERIMETER_SPOTS_PER_SIDE; i++) {
+                        const f = (i + 0.5) / PERIMETER_SPOTS_PER_SIDE - 0.5;
+                        let px, pz, ry;
+                        if (side === 0) { px = zone.pos.x + f * half * 2; pz = zone.pos.z - half; ry = 0; }
+                        else if (side === 1) { px = zone.pos.x + half; pz = zone.pos.z + f * half * 2; ry = Math.PI / 2; }
+                        else if (side === 2) { px = zone.pos.x - f * half * 2; pz = zone.pos.z + half; ry = 0; }
+                        else { px = zone.pos.x - half; pz = zone.pos.z - f * half * 2; ry = Math.PI / 2; }
+                        spots.push({ pos: new THREE.Vector3(px, 0, pz), ry: ry, progress: 0, built: false });
+                    }
+                    P.sides.push({ spots: spots });
+                }
+                shelterPerimeters[zoneKey] = P;
+            }
+            return P;
         }
 
-        function findBarricadeSpot(s, zone) {
-            // Esquina libre del cuadrado centrada en su puesto de defensa
-            const cx = zone.pos.x + Math.cos(s.id * 1.7) * zone.radius * 0.4;
-            const cz = zone.pos.z + Math.sin(s.id * 1.7) * zone.radius * 0.4;
-            for (let k = 0; k < 4; k++) {
-                const slot = (s.buildSlot + k) % 4;
-                const px = cx + BARRICADE_SQUARE[slot][0];
-                const pz = cz + BARRICADE_SQUARE[slot][1];
-                let occupied = false;
-                barricades.forEach(b => {
-                    if (b.health > 0 && Math.hypot(b.position.x - px, b.position.z - pz) < 2.5) occupied = true;
+        function resolveBuildSpot(ref) {
+            if (!ref) return null;
+            const P = shelterPerimeters[ref.key];
+            if (!P || !P.sides[ref.side]) return null;
+            const spot = P.sides[ref.side].spots[ref.idx];
+            return (spot && !spot.built) ? spot : null;
+        }
+
+        // Tramo libre: primero continuar los empezados, luego el mas cercano
+        function findPerimeterSpot(key, pos) {
+            const P = getPerimeter(key);
+            if (!P) return null;
+            let best = null, bestScore = Infinity;
+            P.sides.forEach((sideObj, side) => {
+                sideObj.spots.forEach((spot, idx) => {
+                    if (spot.built) return;
+                    const d = pos.distanceTo(spot.pos);
+                    const score = (spot.progress > 0 ? 0 : 1000) + d;
+                    if (score < bestScore) { bestScore = score; best = { key: key, side: side, idx: idx }; }
                 });
-                if (!occupied) { s.buildSlot = slot; return new THREE.Vector3(px, 0, pz); }
-            }
-            return null;
+            });
+            return best;
+        }
+
+        function perimeterHasFreeSpot(key) {
+            const P = getPerimeter(key);
+            if (!P) return false;
+            for (const sideObj of P.sides) for (const spot of sideObj.spots) if (!spot.built) return true;
+            return false;
         }
 
         function updateSurvivorBuild(s, delta, homeZone) {
-            // Tope: 4 barricadas vivas por superviviente
-            if (countOwnBarricades(s) >= BARRICADES_PER_SURVIVOR) return false;
-            // Iniciar construccion: sin oleada y con recurso
-            if (!s.buildTarget) {
-                if (isWaveActive) return false;
+            if (isWaveActive) return false;
+            const key = s.homeZoneKey;
+            const zone = ZONES[key];
+            if (!zone || !zone.isActiveShelter) return false;
+            let spot = resolveBuildSpot(s.buildSpot);
+            if (!spot) {
                 if (baseResources.ammo < 1) return false;
                 if (s.role !== 'Ingeniero' && Math.random() > 0.004 * gameSpeed) return false;
-                s.buildTarget = findBarricadeSpot(s, homeZone);
-                if (!s.buildTarget) return false; // cuadrado completo
-                s.buildProgress = 0;
-                s.thoughtText = 'Buscando punto para barricada...';
+                s.buildSpot = findPerimeterSpot(key, s.position);
+                if (!s.buildSpot) return false; // perimetro completo
+                spot = resolveBuildSpot(s.buildSpot);
+                s.thoughtText = 'Buscando tramo del perimetro...';
             }
-            const d = s.position.distanceTo(s.buildTarget);
+            const d = s.position.distanceTo(spot.pos);
             if (d > 2) {
-                s.thoughtText = 'Llevando materiales para barricada...';
-                moveTowards(s, s.buildTarget, 0.11);
+                s.thoughtText = spot.progress > 0 ? 'Continuando el tramo del compañero...' : 'Llevando materiales al perimetro...';
+                moveTowards(s, spot.pos, 0.11);
                 return true;
             }
-            // Construyendo in-situ (~3s)
+            // Martillando el tramo (progreso compartido: varios aceleran)
             s.isMoving = false;
-            s.hammering = true; // animacion de martillar
-            aimTowards(s, homeZone.pos);
-            s.buildProgress += delta * gameSpeed;
-            s.thoughtText = `Construyendo barricada ${Math.min(99, Math.round(s.buildProgress / 3 * 100))}%`;
-            if (s.buildProgress >= 3) {
+            s.hammering = true;
+            aimTowards(s, zone.pos);
+            spot.progress += delta * gameSpeed;
+            s.thoughtText = `Levantando perimetro ${Math.min(99, Math.round(spot.progress / PERIMETER_BUILD_TIME * 100))}%`;
+            if (spot.progress >= PERIMETER_BUILD_TIME && !spot.built) {
+                spot.built = true;
                 baseResources.ammo = Math.max(0, baseResources.ammo - 1);
-                const rec = createSurvivorBarricade(s.buildTarget.x, s.buildTarget.z, false);
-                rec.owner = s;
-                s.buildSlot = (s.buildSlot + 1) % 4;
-                addLogEvent(`${s.name} construyo una barricada (${countOwnBarricades(s)}/${BARRICADES_PER_SURVIVOR}) cerca de ${homeZone.name}.`);
-                s.buildTarget = null;
-                s.buildProgress = 0;
+                const rec = createSurvivorBarricade(spot.pos.x, spot.pos.z, false);
+                rec.mesh.rotation.y = spot.ry;
+                rec.owner = null; // tramo del perimetro comun
+                s.buildSpot = null;
+                addLogEvent(`${s.name} levanto un tramo del perimetro en ${zone.name}.`);
                 updateUI();
             }
             return true;
@@ -675,12 +730,13 @@
         // Las torres son obra del refugio PRINCIPAL.
         function updateTowerWork(s, delta, homeZone) {
             if (isWaveActive) return false;
-            if (individualWorkPending(s)) return false; // grupal espera a lo individual
             const mainZone = (ZONES[mainShelterKey] && ZONES[mainShelterKey].isActiveShelter) ? ZONES[mainShelterKey] : homeZone;
             const mainKey = mainZone.key;
             if (countCompleteTowers() + (findTowerSite() ? 1 : 0) >= TOWER_MAX && !findTowerSite()) return false;
             let site = towers.find(t => !t.complete && t.id === s.towerSiteId) || findTowerSite();
             if (!site) {
+                if (s.towerCommitted) { s.towerCommitted = false; return false; } // la obra ya no existe
+                if (anyFreeCrate(s)) return false; // recoleccion urgente primero al abrir tajo
                 if (countCompleteTowers() >= TOWER_MAX) return false;
                 // Fundar obra junto al refugio principal (requiere 1 de municion como materiales)
                 if (baseResources.ammo < 1) return false;
@@ -688,7 +744,12 @@
                 const r = mainZone.radius + 10;
                 site = createTowerSite(mainKey, mainZone.pos.x + Math.cos(ang) * r, mainZone.pos.z + Math.sin(ang) * r);
                 baseResources.ammo = Math.max(0, baseResources.ammo - 1);
+            } else {
+                // Nuevo en la obra: recoleccion urgente primero; comprometido: no abandona
+                if (!s.towerCommitted && anyFreeCrate(s)) return false;
             }
+            s.towerCommitted = true;
+            s.towerSiteId = site.id;
             s.towerSiteId = site.id;
             const d = s.position.distanceTo(site.pos);
             if (d > 2.5) {
@@ -704,7 +765,7 @@
             s.thoughtText = `Construyendo torre ${Math.floor(site.progress)}/${TOWER_WORK_REQUIRED}s`;
             if (site.progress >= TOWER_WORK_REQUIRED) {
                 finishTower(site);
-                survivors.forEach(o => { if (o.towerSiteId === site.id) o.towerSiteId = null; });
+                survivors.forEach(o => { if (o.towerSiteId === site.id) { o.towerSiteId = null; o.towerCommitted = false; } });
             }
             return true;
         }
@@ -804,7 +865,8 @@
         // Fundar refugio en la zona libre que mejor venga (recursos + obra 120s)
         function updateShelterFound(s, delta) {
             if (isWaveActive) return false;
-            if (individualWorkPending(s)) return false; // grupal espera a lo individual
+            if (!shelterFounder && anyFreeCrate(s)) return false; // cajas primero al abrir tajo
+            if (shelterFounder && !s.foundCommitted && anyFreeCrate(s)) return false; // nuevo: cajas primero
             const aliveCount = survivors.filter(o => o.health > 0).length;
             if (aliveCount < 3 || activeShelterKeys.length >= 4) return false;
             if (!shelterFounder) {
@@ -820,6 +882,7 @@
                 updateUI();
             }
             const zone = ZONES[shelterFounder.zoneKey];
+            s.foundCommitted = true; // comprometido: no abandona la fundacion
             const d = s.position.distanceTo(zone.pos);
             if (d > 4) {
                 s.thoughtText = `Yendo a fundar refugio en ${zone.name}...`;
@@ -834,6 +897,7 @@
             if (shelterFounder.progress >= shelterFounder.required) {
                 const key = shelterFounder.zoneKey;
                 shelterFounder = null;
+                survivors.forEach(o => o.foundCommitted = false);
                 activateShelter(key, false);
                 createShelterHouse(key);
                 if (baseResources.heavy >= 1) buildTurretAt(key, false);
@@ -1035,6 +1099,8 @@
             zone.isActiveShelter = false;
             destroyTurretAt(zoneKey);
             activeShelterKeys = activeShelterKeys.filter(k => k !== zoneKey);
+            delete shelterPerimeters[zoneKey]; // el perimetro cae con el refugio
+            survivors.forEach(s => { if (s.buildSpot && s.buildSpot.key === zoneKey) s.buildSpot = null; });
 
             addLogEvent(`¡EL REFUGIO EN ${zone.name.toUpperCase()} HA SIDO DESTRUIDO!`);
             if (zoneKey === mainShelterKey) {
