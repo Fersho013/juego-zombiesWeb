@@ -36,13 +36,16 @@
         // Refugios actualmente ocupados/defendidos por los supervivientes (puede ser >1 a la vez)
         let activeShelterKeys = ['MALL'];
 
-        // Stockpile compartido de recursos entre todos los refugios
+        // Stockpile compartido = contenido del gran deposito (todos disponen)
         const baseResources = {
             ammo: 2,
             meds: 2,
             food: 2,
-            heavy: 2
+            heavy: 2,
+            debris: 0 // escombro comun para construcciones
         };
+        const DEPOT_HP = 6000;
+        const DEPOT_DEBRIS_CAP = 500;
 
         // ==========================================================
         // ZOMBIE TYPES: básico, mediano y grande
@@ -119,7 +122,7 @@
         const DUMMY_CAP = 3;
         const DUMMY_DEBRIS_COST = 20; // + 1 granada del inventario
         const DUMMY_BUILD_TIME = 4;
-        const DEBRIS_CAP = 100;
+        const DEBRIS_CAP = 100; // legado: el escombro ahora es comun del deposito (DEPOT_DEBRIS_CAP)
         let gameOverActive = false;
         let prevGameSpeed = 1;
 
