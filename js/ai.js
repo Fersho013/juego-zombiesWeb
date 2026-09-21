@@ -133,6 +133,53 @@
             return { pos: fleePos, zoneKey: null };
         }
 
+        // ==========================================================
+        // DOCTRINA DE COMBATE POR ARMA
+        // RIFLE (cadencia alta, medio): chicos/medianos primero, grandes despues.
+        // SNIPER (alto DMG, baja cadencia): grandes a distancia, luego medianos, luego chicos.
+        // Resto (escopeta en tierra, etc.): el mas cercano.
+        // ==========================================================
+        function nearestZombieOfClass(pos, range, classes) {
+            let best = null, bestD = range;
+            zombies.forEach(z => {
+                if (z.health <= 0 || z.dying || !classes.includes(z.typeKey)) return;
+                const d = pos.distanceTo(z.position);
+                if (d < bestD) { bestD = d; best = z; }
+            });
+            return best;
+        }
+
+        function pickCombatTarget(s, range) {
+            if (s.primary === 'SNIPER') {
+                return nearestZombieOfClass(s.position, range, ['LARGE'])
+                    || nearestZombieOfClass(s.position, range, ['MEDIUM'])
+                    || nearestZombieOfClass(s.position, range, ['BASIC']);
+            }
+            if (s.primary === 'RIFLE') {
+                return nearestZombieOfClass(s.position, range, ['BASIC', 'MEDIUM'])
+                    || nearestZombieOfClass(s.position, range, ['LARGE']);
+            }
+            return nearestZombieOfClass(s.position, range, ['BASIC', 'MEDIUM', 'LARGE']);
+        }
+
+        // Rol de torre: hueco libre u obra en curso. Suelo-escopeta: torres llenas.
+        function towerRoomFree() {
+            return towers.some(t => t.complete && t.occupants.length < 2);
+        }
+
+        // Que cajas de arma busca cada uno segun su rol:
+        // - aspirante a torre sin RIFLE/SNIPER -> RIFLE o SNIPER (alta cadencia/alcance arriba)
+        // - resto en tierra con torres llenas -> SHOTGUN (5 perdigones de cerca)
+        // - sin torres -> libre eleccion
+        const CRATE_WEAPON_MAP = { RIFLE: 'RIFLE', SNIPER: 'SNIPER', SHOTGUN: 'SHOTGUN' };
+
+        function desiredCrateWeapons(s) {
+            const hasTowerGun = (s.primary === 'RIFLE' || s.primary === 'SNIPER');
+            if (!hasTowerGun && (towerRoomFree() || findTowerSite())) return ['RIFLE', 'SNIPER'];
+            if (!hasTowerGun && s.primary !== 'SHOTGUN' && towers.some(t => t.complete)) return ['SHOTGUN'];
+            return null;
+        }
+
         function updateSurvivorAI(delta) {
             survivors.forEach(s => {
                 if (s.health <= 0) { updateFallenSurvivor(s, delta); return; }
@@ -164,26 +211,19 @@
                     }
                 }
 
-                let nearestZombie = null;
-                let minDist = 999;
-
-                zombies.forEach(z => {
-                    if (z.health > 0 && !z.dying) {
-                        const dist = s.position.distanceTo(z.position);
-                        if (dist < minDist) { minDist = dist; nearestZombie = z; }
-                    }
-                });
-
                 const wconf = WEAPONS[s.primary] || WEAPONS.PISTOL;
                 const effRange = wconf.range * (s.onTower ? 1.3 : 1); // bonus de altura
-                if (nearestZombie && minDist < effRange && s.aiState !== 'FLEE') {
-                    aimTowards(s, nearestZombie.position);
+                // Blanco segun doctrina del arma (rifle/sniper priorizan por tamaño)
+                const target = (s.aiState !== 'FLEE') ? pickCombatTarget(s, effRange) : null;
+                if (target) {
+                    const tDist = s.position.distanceTo(target.position);
+                    aimTowards(s, target.position);
                     // Granada si hay grupo compacto y tiene stock
-                    if (s.grenades > 0 && s.grenadeCooldown <= 0 && minDist < 16 && countNearbyZombies(nearestZombie.position, 6) >= 3) {
-                        throwGrenade(s, nearestZombie.position);
+                    if (s.grenades > 0 && s.grenadeCooldown <= 0 && tDist < 16 && countNearbyZombies(target.position, 6) >= 3) {
+                        throwGrenade(s, target.position);
                         s.thoughtText = `¡Granada fuera! (${s.grenades} restantes)`;
                     } else if (s.shootCooldown <= 0 && s.ammo > 0) {
-                        fireSurvivorWeapon(s, nearestZombie);
+                        fireSurvivorWeapon(s, target);
                     }
                 }
 
@@ -198,8 +238,8 @@
                     const nearbyZ = countNearbyZombies(homeZone.pos, homeZone.radius + 14);
                     const garrisonAlive = Math.max(1, countAliveGarrison(s.homeZoneKey));
 
-                    // Decisión de huida: si la horda supera ampliamente a la guarnición local
-                    if (s.aiState !== 'FLEE' && nearbyZ >= 5 && nearbyZ > garrisonAlive * 2.6) {
+                    // Decisión de huida: en torre aguantan el puesto hasta el fin de la horda
+                    if (!s.onTower && s.aiState !== 'FLEE' && nearbyZ >= 5 && nearbyZ > garrisonAlive * 2.6) {
                         s.aiState = 'FLEE';
                         const dest = pickFleeDestination(s.homeZoneKey);
                         s.fleeTarget = dest.pos;
@@ -431,6 +471,18 @@
         function findClosestAvailableCrate(pos, self) {
             let closest = null;
             let minDist = 999;
+            const want = desiredCrateWeapons(self);
+            // 1) Preferencia de rol (arma de torre o escopeta de tierra)
+            if (want) {
+                crates.forEach(c => {
+                    if (c.isPickedUp || isCrateReserved(c, self)) return;
+                    if (!want.includes(CRATE_WEAPON_MAP[c.typeKey])) return;
+                    const d = pos.distanceTo(c.position);
+                    if (d < minDist) { minDist = d; closest = c; }
+                });
+                if (closest) return closest;
+            }
+            // 2) La libre mas cercana (o rol sin preferencia)
             crates.forEach(c => {
                 if (c.isPickedUp || isCrateReserved(c, self)) return;
                 const d = pos.distanceTo(c.position);
@@ -696,6 +748,9 @@
                 s.position.set(ox, TOWER_HEIGHT + 0.4, s.onTower.pos.z);
                 return true;
             }
+            // Doctrina de torre: solo suben fusil de asalto y francotirador.
+            // El resto queda en tierra (escopeta de cerca). Sin ese arma, a buscarla.
+            if (s.primary !== 'RIFLE' && s.primary !== 'SNIPER') return false;
             const tower = nearestTower(s.position, 60, true);
             if (!tower || tower.occupants.length >= 2) return false;
             if (s.position.distanceTo(tower.pos) > 3) {
