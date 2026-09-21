@@ -48,6 +48,23 @@
         const DEPOT_DEBRIS_CAP = 500;
 
         // ==========================================================
+        // TANQUE (5 piezas: 500 material + 300s cada una)
+        // ==========================================================
+        const TANK_PARTS = [
+            { key: 'RAPID',    label: 'Torreta rapida',     turret: true },
+            { key: 'MISSILES', label: 'Torreta de misiles', turret: true },
+            { key: 'GRENADES', label: 'Torreta de granadas', turret: true },
+            { key: 'BASE',     label: 'Base blindada',      turret: false },
+            { key: 'WHEELS',   label: 'Ruedas todo terreno', turret: false }
+        ];
+        const TANK_PART_COST = 500; // material del deposito (su maximo)
+        const TANK_PART_WORK = 300; // segundos-trabajador por pieza
+        const TANK_HP = 10000;
+        const TANK_ARMOR = 2000;
+        const TANK_REPAIR_TIME = 90; // blindaje de 0 a 2000 (el HP no se repara)
+        const tank = { parts: [], build: null, yard: null, unit: null, emplacements: [] };
+
+        // ==========================================================
         // ZOMBIE TYPES: básico, mediano y grande
         // ==========================================================
         const ZOMBIE_TYPES = {
