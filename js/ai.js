@@ -221,6 +221,13 @@
                         if (w.health > 0 && w.position.distanceTo(z.position) < 4.5) { z.threatStruct = true; break; }
                     }
                 }
+                // Deposito amenazado: defensa total
+                if (!z.threatStruct) {
+                    for (const k of activeShelterKeys) {
+                        const zz = ZONES[k];
+                        if (zz.depot && zz.depot.health > 0 && zz.depot.position.distanceTo(z.position) < 5) { z.threatStruct = true; break; }
+                    }
+                }
             });
 
             survivors.forEach(s => {
@@ -260,8 +267,8 @@
                 if (target) {
                     const tDist = s.position.distanceTo(target.position);
                     aimTowards(s, target.position);
-                    // Granada si hay grupo compacto y tiene stock
-                    if (s.grenades > 0 && s.grenadeCooldown <= 0 && tDist < 16 && countNearbyZombies(target.position, 6) >= 3) {
+                    // Granada si hay grupo compacto (con deposito en peligro: todo el arsenal)
+                    if (s.grenades > 0 && s.grenadeCooldown <= 0 && tDist < 16 && countNearbyZombies(target.position, 6) >= (depotUnderAttack() ? 2 : 3)) {
                         throwGrenade(s, target.position);
                         s.thoughtText = `¡Granada fuera! (${s.grenades} restantes)`;
                     } else if (s.shootCooldown <= 0 && s.ammo > 0) {
@@ -343,6 +350,17 @@
 
                     if (healBusy) {
                         // Curando a un aliado: sin otras tareas este frame
+                    } else if (depotUnderAttack() && !s.carriedCrate && !s.onTower) {
+                        // ¡Al deposito, lo atacan! Todo el arsenal contra la amenaza
+                        s.task = 'defender';
+                        s.aiState = 'SCAVENGE';
+                        const dz = ZONES[mainShelterKey];
+                        const dp = dz && dz.depot ? dz.depot.position : homeZone.pos;
+                        s.thoughtText = '¡Al deposito, lo atacan!';
+                        const dd = s.position.distanceTo(dp);
+                        if (s.combatTarget && updateCombatSpacing(s, s.combatTarget, homeZone)) {}
+                        else if (dd > 7) moveTowards(s, dp, 0.14);
+                        else s.isMoving = false;
                     } else if (s.carriedCrate) {
                         s.task = 'transportar';
                         s.thoughtText = `Transportando ${s.carriedCrate.config.name} a Base`;
@@ -422,6 +440,7 @@
                 }
 
                 if (typeof syncHandTool === 'function') syncHandTool(s); // mazo <=> arma
+                if (typeof syncBackpack === 'function') syncBackpack(s); // mochila solo con caja
                 animateEntityLimbs(s, delta);
             });
 
@@ -541,16 +560,20 @@
             entity.mesh.quaternion.slerp(targetQuat, smoothing);
         }
 
-        // Anima el balanceo de piernas/brazos para una caminata fluida.
-        // Si esta martillando una obra, el brazo derecho golpea como martillo.
+        // Anima balanceo y FLEXION DE CODOS: al caminar braceo con codo
+        // semiflexionado; al martillar, hombro arriba y codo flexionando el golpe.
         function animateEntityLimbs(entity, delta) {
             if (!entity.limbs) return;
             const l = entity.limbs;
+            const elbowL = l.armL.userData ? l.armL.userData.elbow : null;
+            const elbowR = l.armR.userData ? l.armR.userData.elbow : null;
             if (entity.hammering && entity.health > 0) {
                 entity.animPhase += delta * 11 * Math.max(0.5, gameSpeed);
-                const hammer = Math.sin(entity.animPhase) * 0.85;
-                l.armR.rotation.x = -1.3 + hammer; // martillazos
+                const hammer = Math.sin(entity.animPhase);
+                l.armR.rotation.x = -1.3 + hammer * 0.85; // mazo arriba-adelante
+                if (elbowR) elbowR.rotation.x = -1.0 + Math.cos(entity.animPhase) * 0.45; // flexion de codo
                 l.armL.rotation.x *= 0.8;
+                if (elbowL) elbowL.rotation.x += (-0.3 - elbowL.rotation.x) * Math.min(1, delta * 8);
                 l.legL.rotation.x *= 0.8;
                 l.legR.rotation.x *= 0.8;
                 return;
@@ -562,11 +585,15 @@
                 l.legR.rotation.x = -swing;
                 l.armL.rotation.x = -swing * 0.75;
                 l.armR.rotation.x = swing * 0.75;
+                if (elbowL) elbowL.rotation.x = -0.35 + swing * 0.3;
+                if (elbowR) elbowR.rotation.x = -0.35 - swing * 0.3;
             } else {
                 l.legL.rotation.x *= 0.8;
                 l.legR.rotation.x *= 0.8;
                 l.armL.rotation.x *= 0.8;
                 l.armR.rotation.x *= 0.8;
+                if (elbowL) elbowL.rotation.x += (-0.25 - elbowL.rotation.x) * Math.min(1, delta * 8);
+                if (elbowR) elbowR.rotation.x += (-0.25 - elbowR.rotation.x) * Math.min(1, delta * 8);
             }
         }
 
@@ -638,7 +665,7 @@
             else if (crateType === 'MED') { baseResources.meds += 2; survivor.medkits = Math.min(5, (survivor.medkits || 0) + 2); survivor.health = Math.min(survivor.maxHealth, survivor.health + 20); }
             else if (crateType === 'FOOD') baseResources.food += 2;
             else if (crateType === 'ARMOR') { survivor.armor = Math.min(100, survivor.armor + 40); baseResources.ammo += 1; }
-            else if (crateType === 'MATERIAL') { survivor.debris = Math.min(DEBRIS_CAP, (survivor.debris || 0) + 40); baseResources.ammo += 1; }
+            else if (crateType === 'MATERIAL') { baseResources.debris = Math.min(DEPOT_DEBRIS_CAP, (baseResources.debris || 0) + 60); baseResources.ammo += 1; }
             else if (crateType === 'HEAVY') baseResources.heavy += 1;
             // Nuevo arsenal: la caja otorga el arma directamente al portador
             else if (crateType === 'RIFLE') { equipPrimary(survivor, 'RIFLE'); survivor.ammo = Math.min(250, survivor.ammo + 80); baseResources.ammo += 1; }
@@ -654,6 +681,7 @@
             if (crateType === 'MED' || crateType === 'FOOD') survivor.ammo = Math.min(250, survivor.ammo + 50);
 
             playSound('pickup');
+            if (typeof refreshDepotStockVisual === 'function') refreshDepotStockVisual(survivor.homeZoneKey);
             updateUI();
         }
 
@@ -759,11 +787,11 @@
             if (!zone || !zone.isActiveShelter) return false;
             let spot = resolveBuildSpot(s.buildSpot);
             if (!spot) {
-                if ((s.debris || 0) < PERIMETER_DEBRIS_COST) return false; // tramo cuesta escombro
+                if ((baseResources.debris || 0) < PERIMETER_DEBRIS_COST) return false; // tramo del deposito comun
                 if (s.role !== 'Ingeniero' && Math.random() > 0.004 * gameSpeed) return false;
                 s.buildSpot = findPerimeterSpot(key, s.position);
                 if (!s.buildSpot) return false; // perimetro completo
-                s.debris -= PERIMETER_DEBRIS_COST; // pago por adelantado, el tramo queda fondeado
+                baseResources.debris -= PERIMETER_DEBRIS_COST; // el tramo se paga del deposito
                 spot = resolveBuildSpot(s.buildSpot);
                 s.thoughtText = 'Buscando tramo del perimetro...';
             }
@@ -814,13 +842,13 @@
         function updateDummyTask(s, delta) {
             if (isWaveActive) return false;
             if (dummies.length >= DUMMY_CAP) return false;
-            if ((s.debris || 0) < DUMMY_DEBRIS_COST || (s.grenades || 0) < 1) return false;
+            if ((baseResources.debris || 0) < DUMMY_DEBRIS_COST || (s.grenades || 0) < 1) return false;
             const homeZone = ZONES[s.homeZoneKey];
             if (!homeZone || !homeZone.isActiveShelter) return false;
             if (!s.dummySite) {
                 s.dummySite = pickDummySpot(homeZone);
                 s.dummyProgress = 0;
-                s.debris -= DUMMY_DEBRIS_COST;
+                baseResources.debris -= DUMMY_DEBRIS_COST; // del deposito comun
                 s.grenades -= 1;
                 s.heavy = `Granadas (${s.grenades})`;
                 s.thoughtText = 'Llevando el dummie bomba...';
@@ -843,6 +871,24 @@
                 s.dummyProgress = 0;
             }
             return true;
+        }
+
+        // Deposito bajo ataque (ultimos 5s reales): defensa desesperada total
+        function depotUnderAttack() {
+            const dz = ZONES[mainShelterKey];
+            const dep = dz && dz.depot;
+            return !!(dep && dep.health > 0 && Date.now() - (dep.lastHit || 0) < 5000);
+        }
+
+        function nearestDepotKey(pos) {
+            let best = null, bestD = Infinity;
+            activeShelterKeys.forEach(k => {
+                const zz = ZONES[k];
+                if (!zz.depot || zz.depot.health <= 0) return;
+                const d = pos.distanceTo(zz.depot.position);
+                if (d < bestD) { bestD = d; best = k; }
+            });
+            return best;
         }
 
         // ==========================================================
@@ -960,12 +1006,12 @@
                 if (s.towerCommitted) { s.towerCommitted = false; return false; } // la obra ya no existe
                 if (anyFreeCrate(s)) return false; // recoleccion urgente primero al abrir tajo
                 if (countCompleteTowers() >= TOWER_MAX) return false;
-                // Fundar obra junto al refugio principal (cuesta escombro)
-                if ((s.debris || 0) < TOWER_DEBRIS_COST) return false;
+                // Fundar obra junto al refugio principal (15 escombro del deposito)
+                if ((baseResources.debris || 0) < TOWER_DEBRIS_COST) return false;
                 const ang = Math.random() * Math.PI * 2;
                 const r = mainZone.radius + 10;
                 site = createTowerSite(mainKey, mainZone.pos.x + Math.cos(ang) * r, mainZone.pos.z + Math.sin(ang) * r);
-                s.debris -= TOWER_DEBRIS_COST;
+                baseResources.debris -= TOWER_DEBRIS_COST;
             } else {
                 // Nuevo en la obra: recoleccion urgente primero; comprometido: no abandona
                 if (!s.towerCommitted && anyFreeCrate(s)) return false;
@@ -1026,8 +1072,12 @@
             s.isMoving = false;
             s.hammering = true;
             aimTowards(s, target.zone.pos);
-            // Reparar salud del refugio (~25s del 0 al 100)
-            if (target.zone.health < 100) {
+            // Reparar: deposito a 150/s, refugio clasico a 4/s
+            if (target.zone.depot && target.zone.depot.health > 0) {
+                const dep = target.zone.depot;
+                dep.health = Math.min(dep.maxHealth, dep.health + 150 * delta * gameSpeed);
+                target.zone.health = Math.max(0, dep.health / dep.maxHealth * 100);
+            } else if (target.zone.health < 100) {
                 target.zone.health = Math.min(100, target.zone.health + 4 * delta * gameSpeed);
             }
             // Reparar muros dañados y re-levantar caidos (6s por muro, solo si la casa existe)
@@ -1092,11 +1142,11 @@
             const aliveCount = survivors.filter(o => o.health > 0).length;
             if (aliveCount < 3 || activeShelterKeys.length >= 4) return false;
             if (!shelterFounder) {
-                if ((s.debris || 0) < SHELTER_DEBRIS_COST) return false; // fundar cuesta escombro
+                if ((baseResources.debris || 0) < SHELTER_DEBRIS_COST) return false; // fundar cuesta escombro comun
                 if (s.role !== 'Ingeniero' && s.role !== 'Líder' && Math.random() > 0.002 * gameSpeed) return false;
                 const candidateKey = Object.keys(ZONES).find(k => !ZONES[k].isActiveShelter && ZONES[k].intact);
                 if (!candidateKey) return false;
-                s.debris -= SHELTER_DEBRIS_COST;
+                baseResources.debris -= SHELTER_DEBRIS_COST;
                 shelterFounder = { zoneKey: candidateKey, progress: 0, required: SHELTER_FOUND_WORK };
                 showAirBanner(`Nuevo refugio en construccion: ${ZONES[candidateKey].name}`, 'fa-solid fa-house-chimney text-amber-300 text-lg');
                 addLogEvent(`${s.name} inicio la fundacion de un refugio en ${ZONES[candidateKey].name}.`);
@@ -1193,7 +1243,11 @@
                 [-4, 0, 4].forEach(off => cols.push({ x: w.position.x + dx * off, z: w.position.z + dz * off, r: 2.0 }));
             });
             dummies.forEach(d => { if (d.health > 0) cols.push({ x: d.position.x, z: d.position.z, r: 0.9 }); });
-            activeShelterKeys.forEach(k => { const zz = ZONES[k]; cols.push({ x: zz.pos.x, z: zz.pos.z, r: 4 }); });
+            activeShelterKeys.forEach(k => {
+                const zz = ZONES[k];
+                cols.push({ x: zz.pos.x, z: zz.pos.z, r: 4 });
+                if (zz.depot && zz.depot.health > 0) cols.push({ x: zz.depot.position.x, z: zz.depot.position.z, r: 3 });
+            });
             return cols;
         }
 
@@ -1290,17 +1344,18 @@
                     continue;
                 }
 
-                // P4 REFUGIO (posicional): si ya esta dentro del radio, lo demuele
+                // P4 DEPOSITO (reemplaza al refugio: misma funcion): demolerlo de cerca
                 const nearestShelterKey = getNearestActiveShelterKey(z.position);
                 const targetZone = nearestShelterKey ? ZONES[nearestShelterKey] : null;
-                const distToBase = targetZone ? z.position.distanceTo(targetZone.pos) : Infinity;
-                if (targetZone && distToBase < targetZone.radius) {
-                    moveTowards(z, targetZone.pos, z.speed);
+                const depKey = nearestDepotKey(z.position);
+                const depZone = depKey ? ZONES[depKey] : null;
+                const dep = depZone ? depZone.depot : null;
+                const distToDep = dep ? z.position.distanceTo(dep.position) : Infinity;
+                if (dep && distToDep < 7) {
+                    moveTowards(z, dep.position, z.speed);
                     if (z.attackCooldown <= 0) {
-                        targetZone.health = Math.max(0, targetZone.health - 1.5);
-                        z.attackCooldown = 1.5;
-                        if (targetZone.health <= 0) overrunShelter(nearestShelterKey);
-                        updateUI();
+                        damageDepot(depKey, z.damage);
+                        z.attackCooldown = 1.2;
                     }
                     animateEntityLimbs(z, delta);
                     continue;
@@ -1328,8 +1383,16 @@
                         updateUI();
                     }
                 } else if (targetZone) {
-                    // P6 Marcha hacia el refugio
-                    moveTowards(z, targetZone.pos, z.speed);
+                    // P6 Marcha: al deposito si hay, si no al centro (drenaje clasico solo sin deposito)
+                    const marchDep = targetZone.depot && targetZone.depot.health > 0 ? targetZone.depot : null;
+                    const marchPos = marchDep ? marchDep.position : targetZone.pos;
+                    moveTowards(z, marchPos, z.speed);
+                    if (!marchDep && z.position.distanceTo(targetZone.pos) < targetZone.radius && z.attackCooldown <= 0) {
+                        targetZone.health = Math.max(0, targetZone.health - 1.5);
+                        z.attackCooldown = 1.5;
+                        if (targetZone.health <= 0) overrunShelter(nearestShelterKey);
+                        updateUI();
+                    }
                 } else {
                     animateEntityLimbs(z, delta);
                     continue;
@@ -1378,6 +1441,11 @@
             activeShelterKeys = activeShelterKeys.filter(k => k !== zoneKey);
             delete shelterPerimeters[zoneKey]; // el perimetro cae con el refugio
             survivors.forEach(s => { if (s.buildSpot && s.buildSpot.key === zoneKey) s.buildSpot = null; });
+            if (zone.depot) { // resto del deposito si quedo en pie
+                scene.remove(zone.depot.mesh);
+                zone.depot.stockMeshes.forEach(m => scene.remove(m));
+                zone.depot = null;
+            }
 
             addLogEvent(`¡EL REFUGIO EN ${zone.name.toUpperCase()} HA SIDO DESTRUIDO!`);
             if (zoneKey === mainShelterKey) {
@@ -1393,6 +1461,7 @@
                 fallback.health = 50;
                 activeShelterKeys = ['MALL'];
                 mainShelterKey = 'MALL'; // el principal vuelve a ser el Mall
+                if (!fallback.depot) createDepot('MALL'); // nuevo deposito de emergencia
                 buildTurretAt('MALL', true);
                 survivors.forEach(s => { if (s.health > 0) { s.homeZoneKey = 'MALL'; s.aiState = 'FLEE'; s.fleeTarget = fallback.pos.clone(); s.fleeZoneKey = 'MALL'; } });
                 addLogEvent(`¡Sin refugios en pie! Reconstrucción de emergencia en ${fallback.name}.`);
