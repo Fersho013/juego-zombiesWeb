@@ -233,6 +233,15 @@
             survivors.forEach(s => {
                 if (s.health <= 0) { updateFallenSurvivor(s, delta); return; }
                 s.hammering = false; // se activa al martillar obra este frame
+                if (s.tankRole) {
+                    // Batalla terminada: desembarcar y retomar IA normal en este frame
+                    if (tank.unit && tank.unit.crewed && !isWaveActive && zombiesAliveCount === 0) {
+                        dismountTankCrew();
+                    } else {
+                        animateEntityLimbs(s, delta);
+                        return; // tripulacion: la mueve updateTank
+                    }
+                }
 
                 s.shootCooldown = Math.max(0, s.shootCooldown - delta);
                 s.grenadeCooldown = Math.max(0, (s.grenadeCooldown || 0) - delta * gameSpeed);
@@ -289,8 +298,8 @@
                     const nearbyZ = countNearbyZombies(homeZone.pos, homeZone.radius + 14);
                     const garrisonAlive = Math.max(1, countAliveGarrison(s.homeZoneKey));
 
-                    // Decisión de huida: en torre aguantan el puesto hasta el fin de la horda
-                    if (!s.onTower && s.aiState !== 'FLEE' && nearbyZ >= 5 && nearbyZ > garrisonAlive * 2.6) {
+                    // Decisión de huida: en torre o tanque aguantan el puesto
+                    if (!s.onTower && !s.tankRole && s.aiState !== 'FLEE' && nearbyZ >= 5 && nearbyZ > garrisonAlive * 2.6) {
                         s.aiState = 'FLEE';
                         const dest = pickFleeDestination(s.homeZoneKey);
                         s.fleeTarget = dest.pos;
@@ -320,8 +329,12 @@
                             }
                         }
                     } else if (!healBusy) {
-                        // Puesto de francotirador en torre si hay sitio libre
-                        if (!updateTowerOccupy(s, homeZone)) {
+                        // Tanque listo: ¡todos a bordo a cazar sin miedo!
+                        if (tank.unit && !tank.unit.crewed) mountTankCrew();
+                        if (s.tankRole) {
+                            s.task = 'tanque';
+                            s.isMoving = false;
+                        } else if (!updateTowerOccupy(s, homeZone)) {
                             s.aiState = 'DEFEND_BASE';
                             s.task = 'defender';
                             // En tierra y enzarzado: tactica de distancia antes que el puesto fijo
@@ -329,7 +342,9 @@
                                 s.task = 'kitear';
                             } else {
                                 s.thoughtText = `Defendiendo ${homeZone.name}`;
-                                const defPos = homeZone.pos.clone().add(new THREE.Vector3(Math.cos(s.id * 1.7) * homeZone.radius * 0.4, 0, Math.sin(s.id * 1.7) * homeZone.radius * 0.4));
+                                let defPos = homeZone.pos.clone().add(new THREE.Vector3(Math.cos(s.id * 1.7) * homeZone.radius * 0.4, 0, Math.sin(s.id * 1.7) * homeZone.radius * 0.4));
+                                const emp = nearestEmplacement(s.position); // cubrir las torretas del tanque
+                                if (emp && s.position.distanceTo(emp.pos) > 4) defPos = emp.pos.clone();
                                 if (s.position.distanceTo(defPos) > 2) {
                                     moveTowards(s, defPos, 0.12);
                                 } else {
@@ -347,6 +362,7 @@
                     s.aiState = 'SCAVENGE';
                     const homeZone = ZONES[s.homeZoneKey] || ZONES['MALL'];
                     if (s.onTower) dismountTower(s); // de dia se baja a trabajar
+                    if (tank.unit && tank.unit.crewed) dismountTankCrew(); // batalla terminada: desembarco
 
                     if (healBusy) {
                         // Curando a un aliado: sin otras tareas este frame
@@ -393,22 +409,28 @@
                         } else {
                             let handled = false;
                             // 1) Compromiso grupal vigente: continuar la obra sin abandonar
-                            // (solo horda/cura/huida interrumpen, fuera de esta rama)
+                            // (solo horda/cura/huida interrumpen fuera de esta rama)
                             if (s.towerCommitted) {
                                 if (updateTowerWork(s, delta, homeZone)) { s.task = 'torre'; handled = true; }
                                 else s.towerCommitted = false;
                             } else if (s.foundCommitted) {
                                 if (updateShelterFound(s, delta)) { s.task = 'fundar'; handled = true; }
                                 else s.foundCommitted = false;
+                            } else if (s.tankCommitted) {
+                                if (updateTankWork(s, delta, homeZone)) { s.task = 'tanque-build'; handled = true; }
+                                else s.tankCommitted = false;
                             }
                             // 2) Rally: obra activa y sin recoleccion urgente -> todos se suman
                             if (!handled && groupTaskActive() && !anyFreeCrate(s)) {
                                 if (shelterFounder && updateShelterFound(s, delta)) { s.task = 'fundar'; handled = true; }
                                 else if (findTowerSite() && updateTowerWork(s, delta, homeZone)) { s.task = 'torre'; handled = true; }
+                                else if ((tank.build || tank.parts.length > 0) && !tank.unit && updateTankWork(s, delta, homeZone)) { s.task = 'tanque-build'; handled = true; }
                             }
                             // 3) Individuales y luego nuevas obras grupales
                             if (!handled) {
-                                if (maybeCraftSupplyCrate(s)) {
+                                if (updateTankRepair(s, delta)) {
+                                    handled = true; // s.task la pone la funcion
+                                } else if (maybeCraftSupplyCrate(s)) {
                                     s.task = 'fabricar';
                                 } else if (updateSurvivorBuild(s, delta, homeZone)) {
                                     s.task = 'barricada'; // individual (tramo del perimetro)
@@ -420,6 +442,8 @@
                                     s.task = 'fundar'; // grupal
                                 } else if (updateTowerWork(s, delta, homeZone)) {
                                     s.task = 'torre'; // grupal
+                                } else if (updateTankWork(s, delta, homeZone)) {
+                                    s.task = 'tanque-build'; // grupal (5 piezas)
                                 } else {
                                     // Agresividad con correa: cazar rezagados cerca del refugio
                                     const prey = nearestZombieOfClass(s.position, 45, ['BASIC', 'MEDIUM', 'LARGE']);
@@ -994,6 +1018,58 @@
             s.position.x += 3;
         }
 
+        // Tripulacion del tanque: piloto + 3 torretas + ventana. Super agresivos.
+        function mountTankCrew() {
+            const T = tank.unit;
+            if (!T || T.crewed) return;
+            const alive = survivors.filter(s => s.health > 0);
+            if (!alive.length) return;
+            alive.forEach(s => {
+                s.towerCommitted = false; s.foundCommitted = false; s.tankCommitted = false;
+                s.buildSpot = null; s.towerSiteId = null; s.onTower = null;
+                if (s.tankRepair) s.tankRepair = false;
+            });
+            T.roles = {
+                driver: alive[0] || null,
+                rapid: alive[1] || null,
+                missiles: alive[2] || null,
+                grenades: alive[3] || null,
+                window: alive[4] || null
+            };
+            Object.values(T.roles).forEach(s => {
+                if (s) {
+                    s.tankRole = true;
+                    s.aiState = 'DEFEND_BASE';
+                    s.thoughtText = '¡Al tanque, a cazar!';
+                }
+            });
+            if (T.roles.driver) T.roles.driver.thoughtText = '¡Yo conduzco, a por ellos!';
+            if (T.roles.window) T.roles.window.thoughtText = '¡Fuego desde la ventana!';
+            T.crewed = true;
+            showAirBanner('¡EQUIPO AL TANQUE: A CAZAR!', 'fa-solid fa-truck-monster text-amber-300 text-lg');
+            addLogEvent('¡Toda la tripulacion aborda el tanque! Caza total, sin miedo ni huida.');
+            updateUI();
+        }
+
+        function dismountTankCrew() {
+            const T = tank.unit;
+            if (!T || !T.crewed) return;
+            Object.values(T.roles).forEach((s, i) => {
+                if (!s) return;
+                s.tankRole = false;
+                const a = (i / 5) * Math.PI * 2;
+                s.position.set(T.pos.x + Math.cos(a) * 4, 0, T.pos.z + Math.sin(a) * 4);
+                s.position.y = 0;
+                s.mesh.visible = true;
+                s.isMoving = false;
+                s.thoughtText = 'Batalla terminada, a reparar.';
+            });
+            T.roles = {};
+            T.crewed = false;
+            addLogEvent('Tripulacion desembarca. El blindaje se reparara antes de la proxima.');
+            updateUI();
+        }
+
         // Fuera de oleada y sin nada que hacer: aportar 1s por segundo a la obra.
         // Las torres son obra del refugio PRINCIPAL.
         function updateTowerWork(s, delta, homeZone) {
@@ -1035,6 +1111,94 @@
                 finishTower(site);
                 survivors.forEach(o => { if (o.towerSiteId === site.id) { o.towerSiteId = null; o.towerCommitted = false; } });
             }
+            return true;
+        }
+
+        // ==========================================================
+        // TANQUE POR PIEZAS (grupal): 500 material + 300s por pieza.
+        // Las torretas quedan operativas en la horda; al completar las 5,
+        // se ensambla el tanque.
+        // ==========================================================
+        function updateTankWork(s, delta, homeZone) {
+            if (isWaveActive || tank.unit || tank.parts.length >= 5) return false;
+            const mainZone = (ZONES[mainShelterKey] && ZONES[mainShelterKey].isActiveShelter) ? ZONES[mainShelterKey] : homeZone;
+            if (!tank.build) {
+                if (!s.tankCommitted && anyFreeCrate(s)) return false; // recoleccion urgente primero
+                if ((baseResources.debris || 0) < TANK_PART_COST) return false;
+                if (!tank.yard) {
+                    const a = Math.random() * Math.PI * 2;
+                    tank.yard = mainZone.pos.clone().add(new THREE.Vector3(Math.cos(a) * 14, 0, Math.sin(a) * 14));
+                    tank.yard.y = 0;
+                }
+                const def = TANK_PARTS[tank.parts.length];
+                const scaf = buildTowerScaffoldMesh();
+                scaf.position.copy(tank.yard);
+                scaf.scale.y = 0.2;
+                scene.add(scaf);
+                tank.build = { idx: tank.parts.length, progress: 0, mesh: scaf };
+                baseResources.debris -= TANK_PART_COST;
+                showAirBanner(`Tanque: ${def.label} en construccion (${tank.parts.length + 1}/5)`, 'fa-solid fa-truck-monster text-amber-300 text-lg');
+                addLogEvent(`Taller del tanque: pieza ${tank.parts.length + 1}/5 (${def.label}) en obra.`);
+                updateUI();
+            } else {
+                if (!s.tankCommitted && anyFreeCrate(s)) return false;
+            }
+            s.tankCommitted = true;
+            const def = TANK_PARTS[tank.build.idx];
+            const d = s.position.distanceTo(tank.yard);
+            if (d > 3) {
+                s.thoughtText = `Yendo al taller (${def.label})...`;
+                moveTowards(s, tank.yard, 0.11);
+                return true;
+            }
+            s.isMoving = false;
+            s.hammering = true;
+            aimTowards(s, tank.yard);
+            tank.build.progress += delta * gameSpeed;
+            tank.build.mesh.scale.y = Math.min(1, 0.2 + 0.8 * (tank.build.progress / TANK_PART_WORK));
+            s.thoughtText = `Tanque ${def.label} ${Math.floor(tank.build.progress)}/${TANK_PART_WORK}s`;
+            if (tank.build.progress >= TANK_PART_WORK) finishTankPart();
+            return true;
+        }
+
+        function finishTankPart() {
+            const def = TANK_PARTS[tank.build.idx];
+            if (tank.build.mesh) scene.remove(tank.build.mesh);
+            tank.parts.push(def.key);
+            if (def.turret) deployEmplacement(def.key);
+            else addLogEvent(`Pieza del tanque lista (${tank.parts.length}/5): ${def.label}.`);
+            showToast(`Pieza del tanque (${tank.parts.length}/5): ${def.label}`);
+            tank.build = null;
+            if (tank.parts.length >= 5) assembleTank();
+            updateUI();
+        }
+
+        // El que queda libre repara blindaje 0->2000 en 90s (el HP no se repara)
+        function updateTankRepair(s, delta) {
+            const T = tank.unit;
+            if (!T || T.crewed) { s.tankRepair = false; return false; }
+            if (T.armor >= TANK_ARMOR) {
+                if (s.tankRepair) { s.tankRepair = false; addLogEvent('Blindaje del tanque restaurado al maximo.'); }
+                return false;
+            }
+            if (!s.tankRepair) {
+                if (survivors.some(o => o !== s && o.tankRepair)) return false; // uno a la vez
+                if (s.role !== 'Ingeniero' && Math.random() > 0.01 * gameSpeed) return false;
+                s.tankRepair = true;
+                addLogEvent(`${s.name} se encarga de reparar el blindaje del tanque.`);
+            }
+            const d = s.position.distanceTo(T.pos);
+            if (d > 4) {
+                s.thoughtText = 'Yendo a reparar el tanque...';
+                moveTowards(s, T.pos, 0.12);
+                return true;
+            }
+            s.isMoving = false;
+            s.hammering = true;
+            aimTowards(s, T.pos);
+            T.armor = Math.min(TANK_ARMOR, T.armor + (TANK_ARMOR / TANK_REPAIR_TIME) * delta * gameSpeed);
+            s.thoughtText = `Reparando blindaje ${Math.round(T.armor)}/${TANK_ARMOR}`;
+            s.task = 'reparar-tanque';
             return true;
         }
 
@@ -1215,6 +1379,47 @@
             return best;
         }
 
+        // Daño al tanque: primero blindaje (reparable), luego HP (irreparable)
+        function damageTank(amount) {
+            const T = tank.unit;
+            if (!T) return;
+            let rest = amount;
+            if (T.armor > 0) {
+                const ab = Math.min(T.armor, rest);
+                T.armor -= ab;
+                rest -= ab;
+            }
+            T.hp -= rest;
+            if (T.hp <= 0) {
+                T.hp = 0;
+                destroyTank();
+            }
+            updateUI();
+        }
+
+        function destroyTank() {
+            const T = tank.unit;
+            if (!T) return;
+            const pos = T.pos.clone();
+            Object.values(T.roles || {}).forEach(s => {
+                if (s && s.health > 0) {
+                    s.health = Math.max(1, s.health - 40);
+                    s.tankRole = false;
+                    s.mesh.visible = true;
+                }
+            });
+            scene.remove(T.mesh);
+            tank.unit = null;
+            tank.parts = [];
+            tank.build = null;
+            tank.yard = null;
+            survivors.forEach(s => { s.tankCommitted = false; });
+            explodeAt(pos, 18, 300, null);
+            addLogEvent('¡EL TANQUE FUE DESTRUIDO! Habra que reconstruirlo pieza por pieza.');
+            showToast('Tanque destruido.');
+            updateUI();
+        }
+
         // ==========================================================
         // IA DE ZOMBIES
         // ==========================================================
@@ -1243,6 +1448,7 @@
                 [-4, 0, 4].forEach(off => cols.push({ x: w.position.x + dx * off, z: w.position.z + dz * off, r: 2.0 }));
             });
             dummies.forEach(d => { if (d.health > 0) cols.push({ x: d.position.x, z: d.position.z, r: 0.9 }); });
+            if (tank.unit) cols.push({ x: tank.unit.pos.x, z: tank.unit.pos.z, r: 3.5 });
             activeShelterKeys.forEach(k => {
                 const zz = ZONES[k];
                 cols.push({ x: zz.pos.x, z: zz.pos.z, r: 4 });
@@ -1277,6 +1483,23 @@
                 if (z.health <= 0) continue;
 
                 z.attackCooldown = Math.max(0, z.attackCooldown - delta);
+
+                // P0 TANQUE (contacto): la mole se golpea de cerca
+                const TU = tank.unit;
+                if (TU) {
+                    const tdx = z.position.x - TU.pos.x, tdz = z.position.z - TU.pos.z;
+                    if (Math.hypot(tdx, tdz) < 4.5) {
+                        moveTowards(z, TU.pos, z.speed);
+                        if (Math.hypot(z.position.x - TU.pos.x, z.position.z - TU.pos.z) < 4.0 && z.attackCooldown <= 0) {
+                            damageTank(z.damage);
+                            z.attackCooldown = 1.3;
+                            aimTowards(z, TU.pos);
+                            createMuzzleFlash(TU.pos, 0x92400e, 0.08);
+                        }
+                        animateEntityLimbs(z, delta);
+                        continue;
+                    }
+                }
 
                 // P1 DUMMIE BOMBA: el señuelo favorito, lo huelen a distancia
                 const dum = nearestDummy(z.position, 25);
