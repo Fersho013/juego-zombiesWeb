@@ -52,6 +52,10 @@
                 const mainStar = (typeof mainShelterKey !== 'undefined' && key === mainShelterKey) ? ' ★' : '';
                 const wallInfo = (typeof shelterWallCount === 'function' && walls.some(w => w.shelterKey === key))
                     ? ` • <i class="fa-solid fa-house-chimney"></i>${shelterWallCount(key)}/4` : '';
+                // Contenido del deposito (el HP del refugio es el del deposito)
+                const depotLine = zone.depot
+                    ? `<div class="text-[9px] text-amber-200/90 pt-1 leading-snug"><i class="fa-solid fa-boxes-stacked mr-1"></i>Depósito ${Math.round(zone.depot.health)}/${zone.depot.maxHealth} · Munic:${baseResources.ammo} Curas:${baseResources.meds} Comida:${baseResources.food} Armas:${baseResources.heavy} Esc:${Math.round(baseResources.debris || 0)}</div>`
+                    : '';
 
                 const card = document.createElement('div');
                 card.className = 'space-y-1 text-xs bg-slate-900/60 p-2.5 rounded-2xl border border-slate-800';
@@ -67,6 +71,7 @@
                         <span><i class="fa-solid fa-tower-observation mr-1"></i>${turretLabel}</span>
                         <span>${Math.round(zone.health)}%</span>
                     </div>
+                    ${depotLine}
                 `;
                 container.appendChild(card);
             });
@@ -174,8 +179,8 @@
                 document.getElementById('val-ammo').innerText = `${s.ammo} rds`;
                 document.getElementById('bar-ammo').style.width = `${Math.min(100, (s.ammo / 120) * 100)}%`;
 
-                document.getElementById('val-debris').innerText = `${Math.round(s.debris || 0)} / ${DEBRIS_CAP}`;
-                document.getElementById('bar-debris').style.width = `${Math.min(100, ((s.debris || 0) / DEBRIS_CAP) * 100)}%`;
+                document.getElementById('val-debris').innerText = `${Math.round(baseResources.debris || 0)} / ${DEPOT_DEBRIS_CAP}`;
+                document.getElementById('bar-debris').style.width = `${Math.min(100, ((baseResources.debris || 0) / DEPOT_DEBRIS_CAP) * 100)}%`;
 
                 document.getElementById('survivor-melee-val').innerText = s.melee;
                 document.getElementById('survivor-heavy-val').innerText = `Granadas (${s.grenades || 0})`;
