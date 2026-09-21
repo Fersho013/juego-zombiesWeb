@@ -347,6 +347,64 @@ function destroyWall(wall) {
     updateUI();
 }
 
+// ==========================================================
+// DUMMIE BOMBA (señuelo con 200 HP que explota al destruirse)
+// ==========================================================
+function createDummyMesh() {
+    const g = new THREE.Group();
+    const straw = new THREE.MeshStandardMaterial({ color: 0xca8a04, roughness: 0.9 });
+    const body = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.42, 1.1, 8), straw);
+    body.position.y = 0.85;
+    body.castShadow = true;
+    g.add(body);
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.28, 10, 8),
+        new THREE.MeshStandardMaterial({ color: 0xeab308, roughness: 0.8 }));
+    head.position.y = 1.65;
+    head.castShadow = true;
+    g.add(head);
+    // Luz roja parpadeante (señuelo)
+    const lamp = new THREE.Mesh(new THREE.SphereGeometry(0.1, 8, 8),
+        new THREE.MeshBasicMaterial({ color: 0xff2222 }));
+    lamp.position.set(0, 1.2, 0.4);
+    g.add(lamp);
+    // Granada atada a la cintura (la bomba)
+    const charge = new THREE.Mesh(new THREE.SphereGeometry(0.17, 8, 8),
+        new THREE.MeshStandardMaterial({ color: 0x166534, roughness: 0.5 }));
+    charge.position.set(0.3, 0.7, 0.2);
+    g.add(charge);
+    return g;
+}
+
+function spawnDummy(x, z) {
+    const mesh = createDummyMesh();
+    mesh.position.set(x, 0, z);
+    scene.add(mesh);
+    dummies.push({ mesh: mesh, health: DUMMY_HP, maxHealth: DUMMY_HP, position: new THREE.Vector3(x, 0, z) });
+    addLogEvent('Dummie bomba colocado: explotara cuando la horda lo destruya.');
+    playSound('pickup');
+    updateUI();
+}
+
+function nearestDummy(pos, range) {
+    let best = null, bestD = range;
+    for (const d of dummies) {
+        if (d.health <= 0) continue;
+        const ddx = pos.x - d.position.x, ddz = pos.z - d.position.z;
+        const dist = Math.hypot(ddx, ddz);
+        if (dist < bestD) { bestD = dist; best = d; }
+    }
+    return best;
+}
+
+function detonateDummy(d) {
+    const di = dummies.indexOf(d);
+    if (di > -1) dummies.splice(di, 1);
+    scene.remove(d.mesh);
+    explodeAt(d.position.clone(), 9, 110, null);
+    addLogEvent('¡El dummie bomba detono entre la horda!');
+    updateUI();
+}
+
 // ---------- Loop principal de apoyo aereo ----------
 function updateAirSupport(delta) {
     const dt = delta * Math.max(0.001, gameSpeed);
@@ -387,15 +445,17 @@ const LOOT_STYLE = {
     WEAPON:  { color: 0xfbbf24, label: 'Arma' },
     GRENADE: { color: 0x22c55e, label: 'Granadas' },
     MEDKIT:  { color: 0x10b981, label: 'Botiquin' },
+    DEBRIS:  { color: 0xa8a29e, label: 'Escombros' },
     FLARE:   { color: 0xf472b6, label: 'Bengala' }
 };
 
 function rollLootKind() {
     const r = Math.random();
-    if (r < 0.25) return 'ARMOR';
-    if (r < 0.55) return 'WEAPON';
-    if (r < 0.75) return 'GRENADE';
-    if (r < 0.90) return 'MEDKIT';
+    if (r < 0.20) return 'ARMOR';
+    if (r < 0.45) return 'WEAPON';
+    if (r < 0.62) return 'GRENADE';
+    if (r < 0.75) return 'MEDKIT';
+    if (r < 0.90) return 'DEBRIS';
     return 'FLARE';
 }
 
@@ -453,6 +513,9 @@ function collectLoot(s, loot) {
         s.health = Math.min(s.maxHealth, s.health + 25);
         s.thoughtText = 'Botiquin aplicado (+25 salud)';
         addLogEvent(`${s.name} uso un botiquin saqueado (+25 salud).`);
+    } else if (loot.kind === 'DEBRIS') {
+        s.debris = Math.min(DEBRIS_CAP, (s.debris || 0) + 20);
+        s.thoughtText = 'Escombros recogidos (+20)';
     } else if (loot.kind === 'FLARE') {
         s.flares = Math.min(3, (s.flares || 0) + 1);
         s.thoughtText = 'Bengala recogida';
@@ -561,7 +624,7 @@ function createTowerSite(zoneKey, x, z) {
     const tower = {
         id: ++towerSeq, mesh: mesh, pos: new THREE.Vector3(x, 0, z),
         zoneKey: zoneKey, progress: 0, complete: false,
-        health: 200, maxHealth: 200, occupants: []
+        health: TOWER_SITE_HP, maxHealth: TOWER_SITE_HP, occupants: []
     };
     towers.push(tower);
     showAirBanner('Los supervivientes comenzaron a construir', 'fa-solid fa-tower-observation text-amber-300 text-lg');
