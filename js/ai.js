@@ -139,17 +139,35 @@
         // SNIPER (alto DMG, baja cadencia): grandes a distancia, luego medianos, luego chicos.
         // Resto (escopeta en tierra, etc.): el mas cercano.
         // ==========================================================
-        function nearestZombieOfClass(pos, range, classes) {
+        function nearestZombieOfClass(pos, range, classes, filter) {
             let best = null, bestD = range;
             zombies.forEach(z => {
                 if (z.health <= 0 || z.dying || !classes.includes(z.typeKey)) return;
+                if (filter && !filter(z)) return;
                 const d = pos.distanceTo(z.position);
                 if (d < bestD) { bestD = d; best = z; }
             });
             return best;
         }
 
+        function nearLiveDummy(pos, range) {
+            for (const d of dummies) {
+                if (d.health > 0 && pos.distanceTo(d.position) < range) return true;
+            }
+            return false;
+        }
+
         function pickCombatTarget(s, range) {
+            const ALL = ['BASIC', 'MEDIUM', 'LARGE'];
+            // 1) Proteger aliados acosados (zombie pegado a un compañero)
+            let guard = nearestZombieOfClass(s.position, range, ALL, z => z.threatAlly);
+            if (guard) return guard;
+            // 2) Proteger estructuras (nunca dummies: esos se aprovechan, no se defienden)
+            guard = nearestZombieOfClass(s.position, range, ALL, z => z.threatStruct);
+            if (guard) return guard;
+            // 3) Festin: zombies entretenidos con un dummie (tiro facil a distancia)
+            guard = nearestZombieOfClass(s.position, range, ALL, z => nearLiveDummy(z.position, 6));
+            if (guard) return guard;
             if (s.primary === 'SNIPER') {
                 return nearestZombieOfClass(s.position, range, ['LARGE'])
                     || nearestZombieOfClass(s.position, range, ['MEDIUM'])
@@ -181,6 +199,30 @@
         }
 
         function updateSurvivorAI(delta) {
+            // Marcas tacticas del paso (una vez por frame, no por superviviente):
+            // que zombie acosa a un aliado o a una estructura (dummies excluidos).
+            zombies.forEach(z => {
+                z.threatAlly = false;
+                z.threatStruct = false;
+                if (z.health <= 0 || z.dying) return;
+                for (const o of survivors) {
+                    if (o.health > 0 && o.position.distanceTo(z.position) < 5) { z.threatAlly = true; break; }
+                }
+                for (const t of towers) {
+                    if (t.pos.distanceTo(z.position) < 4.5) { z.threatStruct = true; break; }
+                }
+                if (!z.threatStruct) {
+                    for (const b of barricades) {
+                        if (b.health > 0 && b.position.distanceTo(z.position) < 4.5) { z.threatStruct = true; break; }
+                    }
+                }
+                if (!z.threatStruct) {
+                    for (const w of walls) {
+                        if (w.health > 0 && w.position.distanceTo(z.position) < 4.5) { z.threatStruct = true; break; }
+                    }
+                }
+            });
+
             survivors.forEach(s => {
                 if (s.health <= 0) { updateFallenSurvivor(s, delta); return; }
                 s.hammering = false; // se activa al martillar obra este frame
@@ -226,6 +268,8 @@
                         fireSurvivorWeapon(s, target);
                     }
                 }
+                s.combatTarget = target; // para kiteo/caza en la fase de movimiento
+                s.combatRange = effRange;
 
                 // PRIORIDAD 1 (global): curar aliados heridos con botiquin
                 // (los francotiradores en torre no abandonan su puesto para curar)
@@ -273,12 +317,17 @@
                         if (!updateTowerOccupy(s, homeZone)) {
                             s.aiState = 'DEFEND_BASE';
                             s.task = 'defender';
-                            s.thoughtText = `Defendiendo ${homeZone.name}`;
-                            const defPos = homeZone.pos.clone().add(new THREE.Vector3(Math.cos(s.id * 1.7) * homeZone.radius * 0.4, 0, Math.sin(s.id * 1.7) * homeZone.radius * 0.4));
-                            if (s.position.distanceTo(defPos) > 2) {
-                                moveTowards(s, defPos, 0.12);
+                            // En tierra y enzarzado: tactica de distancia antes que el puesto fijo
+                            if (s.combatTarget && !s.onTower && updateCombatSpacing(s, s.combatTarget, homeZone)) {
+                                s.task = 'kitear';
                             } else {
-                                s.isMoving = false;
+                                s.thoughtText = `Defendiendo ${homeZone.name}`;
+                                const defPos = homeZone.pos.clone().add(new THREE.Vector3(Math.cos(s.id * 1.7) * homeZone.radius * 0.4, 0, Math.sin(s.id * 1.7) * homeZone.radius * 0.4));
+                                if (s.position.distanceTo(defPos) > 2) {
+                                    moveTowards(s, defPos, 0.12);
+                                } else {
+                                    s.isMoving = false;
+                                }
                             }
                         } else {
                             s.aiState = 'DEFEND_BASE';
@@ -301,6 +350,8 @@
 
                         if (distToBase < 4) {
                             depositCrateAtBase(s);
+                        } else if (s.combatTarget && s.position.distanceTo(s.combatTarget.position) < 10 && updateCombatSpacing(s, s.combatTarget, homeZone)) {
+                            s.task = 'kitear'; // cautela: primero sobrevivir, la caja espera
                         } else {
                             moveTowards(s, homeZone.pos, 0.1);
                         }
@@ -316,6 +367,8 @@
 
                             if (distToCrate < 1.5) {
                                 pickupCrate(s, s.targetCrate);
+                            } else if (s.combatTarget && s.position.distanceTo(s.combatTarget.position) < 10 && updateCombatSpacing(s, s.combatTarget, homeZone)) {
+                                s.task = 'kitear'; // cautela ante amenaza cercana
                             } else {
                                 moveTowards(s, s.targetCrate.position, 0.11);
                             }
@@ -350,10 +403,18 @@
                                 } else if (updateTowerWork(s, delta, homeZone)) {
                                     s.task = 'torre'; // grupal
                                 } else {
-                                    s.task = 'patrullar';
-                                    s.thoughtText = "Patrullando perímetro...";
-                                    const patrolPos = homeZone.pos.clone().add(new THREE.Vector3(Math.cos(s.id + clock.getElapsedTime() * 0.5) * 10, 0, Math.sin(s.id + clock.getElapsedTime() * 0.5) * 10));
-                                    moveTowards(s, patrolPos, 0.08);
+                                    // Agresividad con correa: cazar rezagados cerca del refugio
+                                    const prey = nearestZombieOfClass(s.position, 45, ['BASIC', 'MEDIUM', 'LARGE']);
+                                    if (prey && homeZone.pos.distanceTo(prey.position) < homeZone.radius + 30) {
+                                        s.task = 'cazar';
+                                        s.thoughtText = 'Cazando rezagados...';
+                                        moveTowards(s, prey.position, 0.11);
+                                    } else {
+                                        s.task = 'patrullar';
+                                        s.thoughtText = "Patrullando perímetro...";
+                                        const patrolPos = homeZone.pos.clone().add(new THREE.Vector3(Math.cos(s.id + clock.getElapsedTime() * 0.5) * 10, 0, Math.sin(s.id + clock.getElapsedTime() * 0.5) * 10));
+                                        moveTowards(s, patrolPos, 0.08);
+                                    }
                                 }
                             }
                         }
@@ -419,6 +480,55 @@
             } else {
                 entity.isMoving = false;
             }
+        }
+
+        // Espaciado tactico (cautela + agresividad): kitear al que se acerca,
+        // acosar al lejano hasta distancia optima, y apartarse del dummie
+        // a punto de estallar. homeZone = correa de equipo (+30). True si se movio.
+        function updateCombatSpacing(s, target, homeZone) {
+            if (!target || target.health <= 0 || target.dying) return false;
+            const leash = homeZone ? homeZone.radius + 30 : 9999;
+            const refuge = homeZone ? homeZone.pos : null;
+            // 1) Prudencia anti-explosion: dummie caliente cerca
+            const hot = nearestDummy(s.position, 12);
+            if (hot && hot.health < hot.maxHealth * 0.4) {
+                const away = s.position.clone().sub(hot.position); away.y = 0;
+                if (away.lengthSq() > 0.01) {
+                    away.normalize();
+                    const np = s.position.clone().addScaledVector(away, 0.13 * gameSpeed);
+                    if (!refuge || np.distanceTo(refuge) < leash) {
+                        s.position.copy(np);
+                        s.isMoving = true;
+                        aimTowards(s, target.position);
+                        s.thoughtText = '¡Apartandose del dummie!';
+                        return true;
+                    }
+                }
+            }
+            // 2) Kiteo y acoso segun alcance del arma
+            const w = WEAPONS[s.primary] || WEAPONS.PISTOL;
+            const range = w.range * (s.onTower ? 1.3 : 1);
+            const d = s.position.distanceTo(target.position);
+            if (d < range * 0.45) {
+                const away = s.position.clone().sub(target.position); away.y = 0;
+                if (away.lengthSq() < 0.01) away.set(1, 0, 0);
+                away.normalize();
+                const np = s.position.clone().addScaledVector(away, 0.13 * gameSpeed);
+                if (!refuge || np.distanceTo(refuge) < leash) {
+                    s.position.copy(np);
+                    s.isMoving = true;
+                    aimTowards(s, target.position);
+                    s.thoughtText = 'Kiteando al zombie...';
+                    return true;
+                }
+            } else if (d > range * 0.85 && d < range + 14) {
+                if (!refuge || target.position.distanceTo(refuge) < leash || s.position.distanceTo(refuge) < leash) {
+                    moveTowards(s, target.position, 0.12);
+                    s.thoughtText = 'Acosando al zombie...';
+                    return true;
+                }
+            }
+            return false;
         }
 
         function aimTowards(entity, targetPos) {
@@ -684,6 +794,23 @@
         // ==========================================================
         // DUMMIE BOMBA (tarea individual): 20 escombro + 1 granada, 200 HP, explota
         // ==========================================================
+        // Trampa: el dummie se planta en la ruta de ataque (hacia la horda),
+        // para que los zombies se entretengan y el equipo los fusile.
+        function pickDummySpot(homeZone) {
+            const c = new THREE.Vector3();
+            let n = 0;
+            zombies.forEach(z => { if (z.health > 0 && !z.dying) { c.add(z.position); n++; } });
+            let ang;
+            if (n > 0) {
+                c.divideScalar(n);
+                ang = Math.atan2(c.x - homeZone.pos.x, c.z - homeZone.pos.z);
+            } else {
+                ang = Math.random() * Math.PI * 2;
+            }
+            const r = homeZone.radius + 10;
+            return new THREE.Vector3(homeZone.pos.x + Math.sin(ang) * r, 0, homeZone.pos.z + Math.cos(ang) * r);
+        }
+
         function updateDummyTask(s, delta) {
             if (isWaveActive) return false;
             if (dummies.length >= DUMMY_CAP) return false;
@@ -691,9 +818,7 @@
             const homeZone = ZONES[s.homeZoneKey];
             if (!homeZone || !homeZone.isActiveShelter) return false;
             if (!s.dummySite) {
-                const ang = Math.random() * Math.PI * 2;
-                const r = homeZone.radius + 8;
-                s.dummySite = new THREE.Vector3(homeZone.pos.x + Math.cos(ang) * r, 0, homeZone.pos.z + Math.sin(ang) * r);
+                s.dummySite = pickDummySpot(homeZone);
                 s.dummyProgress = 0;
                 s.debris -= DUMMY_DEBRIS_COST;
                 s.grenades -= 1;
@@ -1099,17 +1224,17 @@
 
                 z.attackCooldown = Math.max(0, z.attackCooldown - delta);
 
-                // P1 TORRES: objetivo favorito, las asedian a distancia
-                const siegeTower = nearestTower(z.position, 30, false);
-                if (siegeTower) {
-                    moveTowards(z, siegeTower.pos, z.speed);
-                    const hdx = z.position.x - siegeTower.pos.x, hdz = z.position.z - siegeTower.pos.z;
-                    if (Math.hypot(hdx, hdz) < 4.0 && z.attackCooldown <= 0) {
-                        siegeTower.health -= z.damage * 0.8;
-                        z.attackCooldown = 1.4;
-                        aimTowards(z, siegeTower.pos);
-                        createMuzzleFlash(siegeTower.pos, 0x92400e, 0.08);
-                        if (siegeTower.health <= 0) destroyTower(siegeTower);
+                // P1 DUMMIE BOMBA: el señuelo favorito, lo huelen a distancia
+                const dum = nearestDummy(z.position, 25);
+                if (dum) {
+                    moveTowards(z, dum.position, z.speed);
+                    const ddx = z.position.x - dum.position.x, ddz = z.position.z - dum.position.z;
+                    if (Math.hypot(ddx, ddz) < 2.0 && z.attackCooldown <= 0) {
+                        dum.health -= z.damage;
+                        z.attackCooldown = 1.2;
+                        aimTowards(z, dum.position);
+                        createMuzzleFlash(dum.position, 0x92400e, 0.08);
+                        if (dum.health <= 0) detonateDummy(dum);
                     }
                     animateEntityLimbs(z, delta);
                     continue;
@@ -1149,7 +1274,23 @@
                     }
                 });
 
-                // P3 REFUGIO: si ya esta dentro del radio, lo demuele
+                // P3 TORRES: asedio a distancia cuando no hay señuelo ni obstaculo
+                const siegeTower = nearestTower(z.position, 30, false);
+                if (siegeTower) {
+                    moveTowards(z, siegeTower.pos, z.speed);
+                    const hdx = z.position.x - siegeTower.pos.x, hdz = z.position.z - siegeTower.pos.z;
+                    if (Math.hypot(hdx, hdz) < 4.0 && z.attackCooldown <= 0) {
+                        siegeTower.health -= z.damage * 0.8;
+                        z.attackCooldown = 1.4;
+                        aimTowards(z, siegeTower.pos);
+                        createMuzzleFlash(siegeTower.pos, 0x92400e, 0.08);
+                        if (siegeTower.health <= 0) destroyTower(siegeTower);
+                    }
+                    animateEntityLimbs(z, delta);
+                    continue;
+                }
+
+                // P4 REFUGIO (posicional): si ya esta dentro del radio, lo demuele
                 const nearestShelterKey = getNearestActiveShelterKey(z.position);
                 const targetZone = nearestShelterKey ? ZONES[nearestShelterKey] : null;
                 const distToBase = targetZone ? z.position.distanceTo(targetZone.pos) : Infinity;
@@ -1165,23 +1306,7 @@
                     continue;
                 }
 
-                // P4 DUMMIE BOMBA: señuelo antes que los supervivientes
-                const dum = nearestDummy(z.position, 18);
-                if (dum) {
-                    moveTowards(z, dum.position, z.speed);
-                    const ddx = z.position.x - dum.position.x, ddz = z.position.z - dum.position.z;
-                    if (Math.hypot(ddx, ddz) < 2.0 && z.attackCooldown <= 0) {
-                        dum.health -= z.damage;
-                        z.attackCooldown = 1.2;
-                        aimTowards(z, dum.position);
-                        createMuzzleFlash(dum.position, 0x92400e, 0.08);
-                        if (dum.health <= 0) detonateDummy(dum);
-                    }
-                    animateEntityLimbs(z, delta);
-                    continue;
-                }
-
-                // P5 SUPERVIVIENTES (ultimo recurso: si acabo con todo, van por ellos)
+                // P5 SUPERVIVIENTES (si acabo con todo, van por ellos)
                 if (targetSurvivor && minDist < 15) {
                     moveTowards(z, targetSurvivor.position, z.speed);
 
