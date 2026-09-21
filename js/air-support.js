@@ -632,7 +632,7 @@ function destroyTower(tower) {
     tower.occupants.length = 0;
     const ti = towers.indexOf(tower);
     if (ti > -1) towers.splice(ti, 1);
-    survivors.forEach(s => { if (s.towerSiteId === tower.id) s.towerSiteId = null; });
+    survivors.forEach(s => { if (s.towerSiteId === tower.id) { s.towerSiteId = null; s.towerCommitted = false; } });
     addLogEvent(`¡La torre ${tower.id} fue destruida por la horda! Podran construir otra.`);
     showToast(`Torre ${tower.id} destruida.`);
     updateUI();
