@@ -3,6 +3,20 @@
  * Carga el ultimo: depende de todos los modulos anteriores.
  */
 
+// Superficie de errores en pantalla: cualquier excepcion no capturada
+// queda escrita en la bitacora en vez de dejar el canvas negro en silencio.
+window.addEventListener('error', function (ev) {
+    try {
+        const box = document.getElementById('sim-log-container');
+        if (box) {
+            const item = document.createElement('div');
+            item.innerHTML = '<span class="text-red-400 font-bold">[ERROR]</span> ' + (ev.message || 'fallo desconocido');
+            box.appendChild(item);
+            box.scrollTop = box.scrollHeight;
+        }
+    } catch (e) {}
+});
+
 function init3DWorld() {
             const container = document.getElementById('canvas-container');
 
@@ -83,17 +97,33 @@ function init3DWorld() {
         let lastFrameTime = performance.now();
         let stepAccumulator = 0;
 
+        // Bucle blindado: si un subsistema falla, se reporta una vez en bitacora
+        // y el frame CONTINUA hasta renderer.render (nunca mas canvas negro).
+        const subsystemFailed = {};
+        function safeStep(name, fn, arg) {
+            try { fn(arg); }
+            catch (e) {
+                if (!subsystemFailed[name]) {
+                    subsystemFailed[name] = true;
+                    try { addLogEvent(`ERROR en ${name}: ${e.message}`); } catch (_) {}
+                    if (typeof console !== 'undefined' && console.error) console.error('[stepGame:' + name + ']', e);
+                }
+            }
+        }
+
         function stepGame(fixedDelta) {
             frameDelta = Math.min(0.1, fixedDelta);
-            updateSurvivorAI(fixedDelta);
-            updateZombieAI(fixedDelta);
-            updateProjectiles(fixedDelta);
-            if (typeof updateAirSupport === 'function') updateAirSupport(fixedDelta);
-            if (typeof updateTowerBars === 'function') updateTowerBars();
+            safeStep('supervivientes', updateSurvivorAI, fixedDelta);
+            safeStep('zombies', updateZombieAI, fixedDelta);
+            safeStep('proyectiles', updateProjectiles, fixedDelta);
+            safeStep('apoyo-aereo', function (d) { if (typeof updateAirSupport === 'function') updateAirSupport(d); }, fixedDelta);
+            safeStep('barras-estructuras', function () { if (typeof updateTowerBars === 'function') updateTowerBars(); });
             // Game over: equipo completo caido
-            if (!gameOverActive && survivors.length > 0 && survivors.every(s => s.health <= 0)) {
-                if (typeof showGameOver === 'function') showGameOver();
-            }
+            try {
+                if (!gameOverActive && survivors.length > 0 && survivors.every(s => s.health <= 0)) {
+                    if (typeof showGameOver === 'function') showGameOver();
+                }
+            } catch (e) {}
         }
 
 function animate() {
