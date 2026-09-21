@@ -341,6 +341,8 @@
                                     s.task = 'fabricar';
                                 } else if (updateSurvivorBuild(s, delta, homeZone)) {
                                     s.task = 'barricada'; // individual (tramo del perimetro)
+                                } else if (updateDummyTask(s, delta)) {
+                                    s.task = 'dummie'; // individual (señuelo explosivo)
                                 } else if (updateShelterRepair(s, delta)) {
                                     s.task = 'reparar'; // individual (mejorar refugio)
                                 } else if (updateShelterFound(s, delta)) {
@@ -526,6 +528,7 @@
             else if (crateType === 'MED') { baseResources.meds += 2; survivor.medkits = Math.min(5, (survivor.medkits || 0) + 2); survivor.health = Math.min(survivor.maxHealth, survivor.health + 20); }
             else if (crateType === 'FOOD') baseResources.food += 2;
             else if (crateType === 'ARMOR') { survivor.armor = Math.min(100, survivor.armor + 40); baseResources.ammo += 1; }
+            else if (crateType === 'MATERIAL') { survivor.debris = Math.min(DEBRIS_CAP, (survivor.debris || 0) + 40); baseResources.ammo += 1; }
             else if (crateType === 'HEAVY') baseResources.heavy += 1;
             // Nuevo arsenal: la caja otorga el arma directamente al portador
             else if (crateType === 'RIFLE') { equipPrimary(survivor, 'RIFLE'); survivor.ammo = Math.min(250, survivor.ammo + 80); baseResources.ammo += 1; }
@@ -646,10 +649,11 @@
             if (!zone || !zone.isActiveShelter) return false;
             let spot = resolveBuildSpot(s.buildSpot);
             if (!spot) {
-                if (baseResources.ammo < 1) return false;
+                if ((s.debris || 0) < PERIMETER_DEBRIS_COST) return false; // tramo cuesta escombro
                 if (s.role !== 'Ingeniero' && Math.random() > 0.004 * gameSpeed) return false;
                 s.buildSpot = findPerimeterSpot(key, s.position);
                 if (!s.buildSpot) return false; // perimetro completo
+                s.debris -= PERIMETER_DEBRIS_COST; // pago por adelantado, el tramo queda fondeado
                 spot = resolveBuildSpot(s.buildSpot);
                 s.thoughtText = 'Buscando tramo del perimetro...';
             }
@@ -667,13 +671,51 @@
             s.thoughtText = `Levantando perimetro ${Math.min(99, Math.round(spot.progress / PERIMETER_BUILD_TIME * 100))}%`;
             if (spot.progress >= PERIMETER_BUILD_TIME && !spot.built) {
                 spot.built = true;
-                baseResources.ammo = Math.max(0, baseResources.ammo - 1);
                 const rec = createSurvivorBarricade(spot.pos.x, spot.pos.z, false);
                 rec.mesh.rotation.y = spot.ry;
                 rec.owner = null; // tramo del perimetro comun
                 s.buildSpot = null;
                 addLogEvent(`${s.name} levanto un tramo del perimetro en ${zone.name}.`);
                 updateUI();
+            }
+            return true;
+        }
+
+        // ==========================================================
+        // DUMMIE BOMBA (tarea individual): 20 escombro + 1 granada, 200 HP, explota
+        // ==========================================================
+        function updateDummyTask(s, delta) {
+            if (isWaveActive) return false;
+            if (dummies.length >= DUMMY_CAP) return false;
+            if ((s.debris || 0) < DUMMY_DEBRIS_COST || (s.grenades || 0) < 1) return false;
+            const homeZone = ZONES[s.homeZoneKey];
+            if (!homeZone || !homeZone.isActiveShelter) return false;
+            if (!s.dummySite) {
+                const ang = Math.random() * Math.PI * 2;
+                const r = homeZone.radius + 8;
+                s.dummySite = new THREE.Vector3(homeZone.pos.x + Math.cos(ang) * r, 0, homeZone.pos.z + Math.sin(ang) * r);
+                s.dummyProgress = 0;
+                s.debris -= DUMMY_DEBRIS_COST;
+                s.grenades -= 1;
+                s.heavy = `Granadas (${s.grenades})`;
+                s.thoughtText = 'Llevando el dummie bomba...';
+                addLogEvent(`${s.name} prepara un dummie bomba (-${DUMMY_DEBRIS_COST} escombro, -1 granada).`);
+                updateUI();
+            }
+            const d = s.position.distanceTo(s.dummySite);
+            if (d > 2) {
+                moveTowards(s, s.dummySite, 0.11);
+                return true;
+            }
+            s.isMoving = false;
+            s.hammering = true;
+            aimTowards(s, s.dummySite);
+            s.dummyProgress += delta * gameSpeed;
+            s.thoughtText = `Armando dummie ${Math.min(99, Math.round(s.dummyProgress / DUMMY_BUILD_TIME * 100))}%`;
+            if (s.dummyProgress >= DUMMY_BUILD_TIME) {
+                spawnDummy(s.dummySite.x, s.dummySite.z);
+                s.dummySite = null;
+                s.dummyProgress = 0;
             }
             return true;
         }
@@ -793,12 +835,12 @@
                 if (s.towerCommitted) { s.towerCommitted = false; return false; } // la obra ya no existe
                 if (anyFreeCrate(s)) return false; // recoleccion urgente primero al abrir tajo
                 if (countCompleteTowers() >= TOWER_MAX) return false;
-                // Fundar obra junto al refugio principal (requiere 1 de municion como materiales)
-                if (baseResources.ammo < 1) return false;
+                // Fundar obra junto al refugio principal (cuesta escombro)
+                if ((s.debris || 0) < TOWER_DEBRIS_COST) return false;
                 const ang = Math.random() * Math.PI * 2;
                 const r = mainZone.radius + 10;
                 site = createTowerSite(mainKey, mainZone.pos.x + Math.cos(ang) * r, mainZone.pos.z + Math.sin(ang) * r);
-                baseResources.ammo = Math.max(0, baseResources.ammo - 1);
+                s.debris -= TOWER_DEBRIS_COST;
             } else {
                 // Nuevo en la obra: recoleccion urgente primero; comprometido: no abandona
                 if (!s.towerCommitted && anyFreeCrate(s)) return false;
@@ -925,12 +967,11 @@
             const aliveCount = survivors.filter(o => o.health > 0).length;
             if (aliveCount < 3 || activeShelterKeys.length >= 4) return false;
             if (!shelterFounder) {
-                if (baseResources.ammo < SHELTER_FOUND_COST.ammo || baseResources.food < SHELTER_FOUND_COST.food) return false;
+                if ((s.debris || 0) < SHELTER_DEBRIS_COST) return false; // fundar cuesta escombro
                 if (s.role !== 'Ingeniero' && s.role !== 'Líder' && Math.random() > 0.002 * gameSpeed) return false;
                 const candidateKey = Object.keys(ZONES).find(k => !ZONES[k].isActiveShelter && ZONES[k].intact);
                 if (!candidateKey) return false;
-                baseResources.ammo -= SHELTER_FOUND_COST.ammo;
-                baseResources.food -= SHELTER_FOUND_COST.food;
+                s.debris -= SHELTER_DEBRIS_COST;
                 shelterFounder = { zoneKey: candidateKey, progress: 0, required: SHELTER_FOUND_WORK };
                 showAirBanner(`Nuevo refugio en construccion: ${ZONES[candidateKey].name}`, 'fa-solid fa-house-chimney text-amber-300 text-lg');
                 addLogEvent(`${s.name} inicio la fundacion de un refugio en ${ZONES[candidateKey].name}.`);
@@ -1014,6 +1055,42 @@
             return bestKey;
         }
 
+        // Colision fisica: los zombies no atraviesan torres, barricadas,
+        // muros, dummies ni el nucleo del refugio (los supervivientes si pasan)
+        function buildZombieColliders() {
+            const cols = [];
+            towers.forEach(t => cols.push({ x: t.pos.x, z: t.pos.z, r: 2.6 }));
+            barricades.forEach(b => { if (b.health > 0) cols.push({ x: b.position.x, z: b.position.z, r: 1.5 }); });
+            walls.forEach(w => {
+                if (w.health <= 0) return;
+                const ry = (w.mesh && w.mesh.rotation) ? w.mesh.rotation.y : 0;
+                const dx = Math.cos(ry), dz = -Math.sin(ry); // eje largo del muro
+                [-4, 0, 4].forEach(off => cols.push({ x: w.position.x + dx * off, z: w.position.z + dz * off, r: 2.0 }));
+            });
+            dummies.forEach(d => { if (d.health > 0) cols.push({ x: d.position.x, z: d.position.z, r: 0.9 }); });
+            activeShelterKeys.forEach(k => { const zz = ZONES[k]; cols.push({ x: zz.pos.x, z: zz.pos.z, r: 4 }); });
+            return cols;
+        }
+
+        function resolveZombieCollisions() {
+            const cols = buildZombieColliders();
+            if (!cols.length) return;
+            zombies.forEach(z => {
+                if (z.health <= 0 || z.dying) return;
+                for (const c of cols) {
+                    const dx = z.position.x - c.x, dz = z.position.z - c.z;
+                    const min = c.r + 0.5;
+                    if (Math.abs(dx) >= min || Math.abs(dz) >= min) continue; // rechazo rapido
+                    const d = Math.hypot(dx, dz);
+                    if (d < min && d > 0.001) {
+                        const push = min - d;
+                        z.position.x += dx / d * push;
+                        z.position.z += dz / d * push;
+                    }
+                }
+            });
+        }
+
         function updateZombieAI(delta) {
             for (let i = zombies.length - 1; i >= 0; i--) {
                 const z = zombies[i];
@@ -1022,33 +1099,42 @@
 
                 z.attackCooldown = Math.max(0, z.attackCooldown - delta);
 
-                // Barricada bloqueando el paso: el zombie la golpea primero
-                const block = nearestBarricade(z.position, 2.8);
-                if (block && z.attackCooldown <= 0) {
-                    block.health -= z.damage * 0.6;
-                    z.attackCooldown = 1.2;
-                    z.isMoving = false;
-                    aimTowards(z, block.position);
-                    createMuzzleFlash(block.position, 0x92400e, 0.08);
-                    if (block.health <= 0) {
-                        scene.remove(block.mesh);
-                        const bi = barricades.indexOf(block);
-                        if (bi > -1) barricades.splice(bi, 1);
-                        addLogEvent('Una barricada ha sido destruida por la horda.');
+                // P1 TORRES: objetivo favorito, las asedian a distancia
+                const siegeTower = nearestTower(z.position, 30, false);
+                if (siegeTower) {
+                    moveTowards(z, siegeTower.pos, z.speed);
+                    const hdx = z.position.x - siegeTower.pos.x, hdz = z.position.z - siegeTower.pos.z;
+                    if (Math.hypot(hdx, hdz) < 4.0 && z.attackCooldown <= 0) {
+                        siegeTower.health -= z.damage * 0.8;
+                        z.attackCooldown = 1.4;
+                        aimTowards(z, siegeTower.pos);
+                        createMuzzleFlash(siegeTower.pos, 0x92400e, 0.08);
+                        if (siegeTower.health <= 0) destroyTower(siegeTower);
                     }
                     animateEntityLimbs(z, delta);
                     continue;
                 }
 
-                // Muro de casa-refugio en el camino: tambien lo golpea
-                const wallBlock = nearestWall(z.position, 2.8);
-                if (wallBlock && z.attackCooldown <= 0) {
-                    wallBlock.health -= z.damage * 0.6;
-                    z.attackCooldown = 1.2;
-                    z.isMoving = false;
-                    aimTowards(z, wallBlock.position);
-                    createMuzzleFlash(wallBlock.position, 0x92400e, 0.08);
-                    if (wallBlock.health <= 0) destroyWall(wallBlock);
+                // P2 BARRICADAS Y MUROS en el camino (los mastican al pasar)
+                const block = nearestBarricade(z.position, 10) || nearestWall(z.position, 10);
+                if (block) {
+                    moveTowards(z, block.position, z.speed);
+                    const bdx = z.position.x - block.position.x, bdz = z.position.z - block.position.z;
+                    if (Math.hypot(bdx, bdz) < 2.6 && z.attackCooldown <= 0) {
+                        block.health -= z.damage * 0.6;
+                        z.attackCooldown = 1.2;
+                        aimTowards(z, block.position);
+                        createMuzzleFlash(block.position, 0x92400e, 0.08);
+                        if (block.health <= 0) {
+                            if (block.shelterKey) destroyWall(block);
+                            else {
+                                scene.remove(block.mesh);
+                                const bi = barricades.indexOf(block);
+                                if (bi > -1) barricades.splice(bi, 1);
+                                addLogEvent('Una barricada ha sido destruida por la horda.');
+                            }
+                        }
+                    }
                     animateEntityLimbs(z, delta);
                     continue;
                 }
@@ -1063,6 +1149,39 @@
                     }
                 });
 
+                // P3 REFUGIO: si ya esta dentro del radio, lo demuele
+                const nearestShelterKey = getNearestActiveShelterKey(z.position);
+                const targetZone = nearestShelterKey ? ZONES[nearestShelterKey] : null;
+                const distToBase = targetZone ? z.position.distanceTo(targetZone.pos) : Infinity;
+                if (targetZone && distToBase < targetZone.radius) {
+                    moveTowards(z, targetZone.pos, z.speed);
+                    if (z.attackCooldown <= 0) {
+                        targetZone.health = Math.max(0, targetZone.health - 1.5);
+                        z.attackCooldown = 1.5;
+                        if (targetZone.health <= 0) overrunShelter(nearestShelterKey);
+                        updateUI();
+                    }
+                    animateEntityLimbs(z, delta);
+                    continue;
+                }
+
+                // P4 DUMMIE BOMBA: señuelo antes que los supervivientes
+                const dum = nearestDummy(z.position, 18);
+                if (dum) {
+                    moveTowards(z, dum.position, z.speed);
+                    const ddx = z.position.x - dum.position.x, ddz = z.position.z - dum.position.z;
+                    if (Math.hypot(ddx, ddz) < 2.0 && z.attackCooldown <= 0) {
+                        dum.health -= z.damage;
+                        z.attackCooldown = 1.2;
+                        aimTowards(z, dum.position);
+                        createMuzzleFlash(dum.position, 0x92400e, 0.08);
+                        if (dum.health <= 0) detonateDummy(dum);
+                    }
+                    animateEntityLimbs(z, delta);
+                    continue;
+                }
+
+                // P5 SUPERVIVIENTES (ultimo recurso: si acabo con todo, van por ellos)
                 if (targetSurvivor && minDist < 15) {
                     moveTowards(z, targetSurvivor.position, z.speed);
 
@@ -1083,40 +1202,18 @@
                         }
                         updateUI();
                     }
-                } else {
-                    // Torre en el camino: la horda la golpea
-                    const tw = nearestTower(z.position, 3.5, false);
-                    if (tw && z.attackCooldown <= 0) {
-                        tw.health -= z.damage * 0.8;
-                        z.attackCooldown = 1.4;
-                        z.isMoving = false;
-                        aimTowards(z, tw.pos);
-                        createMuzzleFlash(tw.pos, 0x92400e, 0.08);
-                        if (tw.health <= 0) destroyTower(tw);
-                        animateEntityLimbs(z, delta);
-                        continue;
-                    }
-                    const nearestShelterKey = getNearestActiveShelterKey(z.position);
-                    if (!nearestShelterKey) { animateEntityLimbs(z, delta); continue; }
-                    const targetZone = ZONES[nearestShelterKey];
-
+                } else if (targetZone) {
+                    // P6 Marcha hacia el refugio
                     moveTowards(z, targetZone.pos, z.speed);
-                    const distToBase = z.position.distanceTo(targetZone.pos);
-
-                    if (distToBase < targetZone.radius && z.attackCooldown <= 0) {
-                        targetZone.health = Math.max(0, targetZone.health - 1.5);
-                        z.attackCooldown = 1.5;
-
-                        if (targetZone.health <= 0) {
-                            overrunShelter(nearestShelterKey);
-                        }
-                        updateUI();
-                    }
+                } else {
+                    animateEntityLimbs(z, delta);
+                    continue;
                 }
 
                 animateEntityLimbs(z, delta);
             }
 
+            resolveZombieCollisions();
             updateTurrets(delta);
         }
 
