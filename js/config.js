@@ -45,7 +45,7 @@
             debris: 0 // escombro comun para construcciones
         };
         const DEPOT_HP = 6000;
-        const DEPOT_DEBRIS_CAP = 500;
+        const DEPOT_DEBRIS_CAP = 1000; // limite del almacen
 
         // ==========================================================
         // TANQUE (5 piezas: 500 material + 300s cada una)
@@ -96,7 +96,7 @@
 
         // Cooldown real (segundos) de intervenciones divinas + timestamps
         const INTERVENTION_COOLDOWN = 10;
-        const interventionCooldowns = { airdrop: 0, artillery: 0, adrenaline: 0, barricade: 0 };
+        const interventionCooldowns = { airdrop: 0, artillery: 0, adrenaline: 0, barricade: 0, materials: 0 };
         let cooldownTickInterval = null;
 
         // Unidades aereas animadas (avion / helicoptero) y granadas con mecha
