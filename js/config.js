@@ -92,13 +92,14 @@
         const TOWER_WORK_REQUIRED = 400; // segundos-trabajador por torre
         const TOWER_HEIGHT = 8.4; // altura de la plataforma
         const TOWER_HP = 400;
-        const BARRICADES_PER_SURVIVOR = 4; // maximo por superviviente
+        const BARRICADES_PER_SURVIVOR = 4; // legado: el perimetro compartido lo reemplaza (16 tramos/refugio)
         const LOOT_CHANCE = 0.22; // prob. de que un zombie suelte loot
         const LOOT_DESPAWN = 45; // segundos antes de que el loot caduque
         const towers = []; // {id, mesh, pos, zoneKey, progress, complete, health, occupants[]}
         const loots = []; // pickups dejados por zombies {mesh, kind, payload, position, age}
         const healFX = []; // cruces verdes flotantes
         let towerSeq = 0;
+        const shelterPerimeters = {}; // zoneKey -> cuadrado compartido {half, sides:[{spots:[{pos,ry,progress,built}]}]}
 
         // ==========================================================
         // REFUGIO PRINCIPAL / MUROS / GAME OVER (cambios serie 4)
