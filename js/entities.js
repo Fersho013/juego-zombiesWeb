@@ -84,6 +84,7 @@
             MED: { name: 'Caja de Curaciones', color: 0x10b981, icon: 'fa-kit-medical', type: 'med' },
             FOOD: { name: 'Caja de Comida', color: 0x3b82f6, icon: 'fa-utensils', type: 'food' },
             ARMOR: { name: 'Caja de Blindaje', color: 0x64748b, icon: 'fa-shield-halved', type: 'armor' },
+            MATERIAL: { name: 'Caja de materiales', color: 0xa8a29e, icon: 'fa-cubes', type: 'material' },
             RIFLE: { name: 'Caja Rifle de Asalto', color: 0xfbbf24, icon: 'fa-gun', type: 'rifle' },
             SHOTGUN: { name: 'Caja Escopeta', color: 0xfb923c, icon: 'fa-burst', type: 'shotgun' },
             SNIPER: { name: 'Caja Francotirador', color: 0x38bdf8, icon: 'fa-crosshairs', type: 'sniper' },
@@ -149,6 +150,10 @@
                 { type: 'RIFLE', x: 12, z: -12 },
                 { type: 'SHOTGUN', x: -12, z: 12 },
                 { type: 'ARMOR', x: 4, z: 14 },
+                { type: 'MATERIAL', x: -4, z: -14 },
+                { type: 'MATERIAL', x: 52, z: -4 },
+                { type: 'MATERIAL', x: -52, z: 4 },
+                { type: 'MATERIAL', x: 10, z: -52 },
                 { type: 'GRENADE', x: 58, z: 6 },
                 { type: 'SNIPER', x: -58, z: -14 },
                 { type: 'RIFLE', x: 0, z: -52 }
@@ -201,6 +206,9 @@
                     grenades: cfg.grenades || 0,
                     grenadeCooldown: 0,
                     armor: 0, // blindaje: absorbe 50% hasta agotarse
+                    debris: 0, // escombros: material para barricadas, torres y dummies
+                    dummySite: null, // punto donde arma el dummie bomba
+                    dummyProgress: 0,
                     medkits: cfg.medkits || 1, // botiquines para curar aliados
                     healTarget: null,
                     healFXTimer: 0,
