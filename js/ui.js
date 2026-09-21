@@ -174,6 +174,9 @@
                 document.getElementById('val-ammo').innerText = `${s.ammo} rds`;
                 document.getElementById('bar-ammo').style.width = `${Math.min(100, (s.ammo / 120) * 100)}%`;
 
+                document.getElementById('val-debris').innerText = `${Math.round(s.debris || 0)} / ${DEBRIS_CAP}`;
+                document.getElementById('bar-debris').style.width = `${Math.min(100, ((s.debris || 0) / DEBRIS_CAP) * 100)}%`;
+
                 document.getElementById('survivor-melee-val').innerText = s.melee;
                 document.getElementById('survivor-heavy-val').innerText = `Granadas (${s.grenades || 0})`;
                 const armorEl = document.getElementById('survivor-armor-val');
