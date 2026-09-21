@@ -346,18 +346,29 @@
             survivor.malletOn = false;
         }
 
-        // Mini mazo de obra: reemplaza momentaneamente al arma al martillar
+        // Martillo de uña: mango en puño y CABEZA con la cara (#5) al frente.
+        // La cara es el disco plano que mira +z (hacia la obra) para golpear con ella.
         function createMalletMesh() {
             const g = new THREE.Group();
             const wood = new THREE.MeshStandardMaterial({ color: 0x92600f, roughness: 0.9 });
-            const steel = new THREE.MeshStandardMaterial({ color: 0x64748b, metalness: 0.7, roughness: 0.35 });
-            const handle = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.45, 0.07), wood);
-            handle.position.set(0, -0.12, 0.05);
-            handle.castShadow = true;
-            const head = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.14, 0.14), steel);
-            head.position.set(0, -0.34, 0.05);
-            head.castShadow = true;
-            g.add(handle, head);
+            const steel = new THREE.MeshStandardMaterial({ color: 0x9ca3af, metalness: 0.8, roughness: 0.3 });
+            const darkSteel = new THREE.MeshStandardMaterial({ color: 0x4b5563, metalness: 0.7, roughness: 0.4 });
+            function mpart(geo, mat, x, y, z, rx) {
+                const m = new THREE.Mesh(geo, mat);
+                m.position.set(x, y, z);
+                if (rx) m.rotation.x = rx;
+                m.castShadow = true;
+                g.add(m);
+                return m;
+            }
+            // Mango: continua el brazo hacia abajo desde el puño (origen = puño)
+            mpart(new THREE.BoxGeometry(0.07, 0.5, 0.07), wood, 0, -0.25, 0);
+            // Cabeza: campana cilindrica con la CARA plana mirando +z (al frente)
+            mpart(new THREE.CylinderGeometry(0.10, 0.10, 0.14, 12), steel, 0, -0.50, 0.08, Math.PI / 2);
+            // Cuello entre mango y campana
+            mpart(new THREE.BoxGeometry(0.08, 0.08, 0.16), darkSteel, 0, -0.50, -0.06);
+            // Uña trasera (lado opuesto a la cara)
+            mpart(new THREE.BoxGeometry(0.07, 0.07, 0.22), darkSteel, 0, -0.46, -0.24);
             return g;
         }
 
