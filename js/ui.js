@@ -139,6 +139,23 @@
                     aliveIds.push('shelter-repair-bar');
                 }
             }
+            // Tanque: pieza en obra + estado operativo
+            if (typeof tank !== 'undefined' && typeof TANK_PARTS !== 'undefined') {
+                if (tank.build) {
+                    const def = TANK_PARTS[tank.build.idx];
+                    const pct = Math.min(100, Math.round(tank.build.progress / TANK_PART_WORK * 100));
+                    structureBar(wrap, 'tank-part-bar', `Tanque: ${def.label} (${tank.parts.length + 1}/5)`,
+                        '<i class="fa-solid fa-truck-monster text-amber-300 mr-1"></i>', pct, `${pct}% (${Math.floor(tank.build.progress)}/${TANK_PART_WORK}s)`);
+                    aliveIds.push('tank-part-bar');
+                }
+                if (tank.unit) {
+                    const U = tank.unit;
+                    const hpPct = Math.max(0, Math.round(U.hp / TANK_HP * 100));
+                    structureBar(wrap, 'tank-status-bar', `Tanque HP ${Math.round(U.hp)} · Blind ${Math.round(U.armor)}`,
+                        '<i class="fa-solid fa-shield-halved text-emerald-300 mr-1"></i>', hpPct, `${hpPct}%`);
+                    aliveIds.push('tank-status-bar');
+                }
+            }
             Array.from(wrap.children).forEach(ch => {
                 if (!aliveIds.includes(ch.id)) wrap.removeChild(ch);
             });
