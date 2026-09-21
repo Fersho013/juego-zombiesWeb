@@ -186,7 +186,7 @@
             if (cooldownTickInterval) return;
             cooldownTickInterval = setInterval(() => {
                 updateCooldownButtons();
-                const anyLeft = ['airdrop', 'artillery', 'adrenaline', 'barricade'].some(t => cooldownRemaining(t) > 0);
+                const anyLeft = ['airdrop', 'artillery', 'adrenaline', 'barricade', 'materials'].some(t => cooldownRemaining(t) > 0);
                 if (!anyLeft) { clearInterval(cooldownTickInterval); cooldownTickInterval = null; }
             }, 250);
         }
@@ -206,6 +206,14 @@
                 });
                 addLogEvent("¡Suministros aéreos en camino a todos los Refugios!");
                 showToast("Avion de suministros en camino.");
+            } else if (type === 'materials') {
+                // Avion deja 2 cajas de materiales por refugio con animacion
+                activeShelterKeys.forEach(key => {
+                    planeSupplyDrop(key, ['MATERIAL', 'MATERIAL']);
+                });
+                showAirBanner('Materiales de construccion en camino', 'fa-solid fa-cubes text-stone-300 text-lg');
+                addLogEvent("¡Avion con materiales de construccion en camino a los Refugios!");
+                showToast("Materiales de construccion en camino.");
             } else if (type === 'artillery') {
                 // Helicoptero dispara misil AoE y se retira (daño aplicado al impactar)
                 heliMissileStrike();
