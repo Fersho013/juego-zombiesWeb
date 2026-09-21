@@ -68,7 +68,7 @@
         // Catalogo de armas de fuego (dmg = [min,max])
         const WEAPONS = {
             PISTOL:  { key: 'PISTOL',  label: 'Pistola 9mm',      dmg: [12, 22], range: 18, cooldown: 0.38, color: 0xfde68a, sound: 'C3' },
-            RIFLE:   { key: 'RIFLE',   label: 'Rifle de Asalto',  dmg: [22, 38], range: 30, cooldown: 0.20, color: 0xfde68a, sound: 'E3' },
+            RIFLE:   { key: 'RIFLE',   label: 'Rifle de Asalto',  dmg: [22, 38], range: 26, cooldown: 0.20, color: 0xfde68a, sound: 'E3' },
             SHOTGUN: { key: 'SHOTGUN', label: 'Escopeta Cal.12',  dmg: [16, 26], range: 13, cooldown: 0.95, color: 0xfb923c, sound: 'A2', pellets: 5 },
             SNIPER:  { key: 'SNIPER',  label: 'Rifle Precision',  dmg: [70, 110], range: 42, cooldown: 1.40, color: 0x38bdf8, sound: 'G3' },
             SMG:     { key: 'SMG',     label: 'Subfusil',         dmg: [14, 24], range: 22, cooldown: 0.13, color: 0xfde68a, sound: 'D3' }
