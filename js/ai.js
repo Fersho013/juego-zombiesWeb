@@ -261,7 +261,7 @@
                         }
                     } else {
                         if (!s.targetCrate || s.targetCrate.isPickedUp) {
-                            s.targetCrate = findClosestAvailableCrate(s.position);
+                            s.targetCrate = findClosestAvailableCrate(s.position, s);
                         }
 
                         if (s.targetCrate) {
@@ -394,14 +394,23 @@
             }
         }
 
-        function findClosestAvailableCrate(pos) {
+        // Caja libre = no recogida Y no reservada por otro vivo.
+        // Asi cada superviviente va por una caja distinta y no pierden tiempo.
+        function isCrateReserved(c, self) {
+            for (const o of survivors) {
+                if (o === self || o.health <= 0) continue;
+                if (o.targetCrate === c || o.carriedCrate === c) return true;
+            }
+            return false;
+        }
+
+        function findClosestAvailableCrate(pos, self) {
             let closest = null;
             let minDist = 999;
             crates.forEach(c => {
-                if (!c.isPickedUp) {
-                    const d = pos.distanceTo(c.position);
-                    if (d < minDist) { minDist = d; closest = c; }
-                }
+                if (c.isPickedUp || isCrateReserved(c, self)) return;
+                const d = pos.distanceTo(c.position);
+                if (d < minDist) { minDist = d; closest = c; }
             });
             return closest;
         }
