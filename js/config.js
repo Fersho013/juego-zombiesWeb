@@ -65,6 +65,26 @@
         const tank = { parts: [], build: null, yard: null, unit: null, emplacements: [] };
 
         // ==========================================================
+        // CARRO DE CARGA (receta: 4 piezas x 100 material = 400 total)
+        // Max 2 autos, 4 tripulantes y 6 cajas cada uno, 2000 HP.
+        // ==========================================================
+        const CART_PARTS = [
+            { key: 'RUEDAS', label: 'Ruedas' },
+            { key: 'BASE', label: 'Base' },
+            { key: 'MOTOR', label: 'Motor' },
+            { key: 'CAJA', label: 'Caja de vehiculo' }
+        ];
+        const CART_PART_COST = 100;
+        const CART_PART_WORK = 120; // segundos-trabajador por pieza
+        const CART_MAX = 2;
+        const CART_HP = 2000;
+        const CART_CRATE_CAP = 6;
+        const carts = [];
+        let cartBuild = null; // {cartIdx, partIdx, progress, mesh, yard}
+        let gameTime = 0; // reloj de simulacion (para detectar rachas sin bajas)
+        let lastKillAt = 0;
+
+        // ==========================================================
         // ZOMBIE TYPES: básico, mediano y grande
         // ==========================================================
         const ZOMBIE_TYPES = {
