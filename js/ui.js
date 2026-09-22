@@ -156,6 +156,23 @@
                     aliveIds.push('tank-status-bar');
                 }
             }
+            // Carro en obra
+            if (typeof cartBuild !== 'undefined' && cartBuild && typeof CART_PARTS !== 'undefined') {
+                const def = CART_PARTS[cartBuild.partIdx];
+                const pct = Math.min(100, Math.round(cartBuild.progress / CART_PART_WORK * 100));
+                structureBar(wrap, 'cart-build-bar', `Carro ${cartBuild.cartIdx + 1}: ${def.label} (${cartBuild.partIdx + 1}/4)`,
+                    '<i class="fa-solid fa-truck-pickup text-amber-300 mr-1"></i>', pct, `${pct}% (${Math.floor(cartBuild.progress)}/${CART_PART_WORK}s)`);
+                aliveIds.push('cart-build-bar');
+            }
+            // Carros operativos: carga y HP
+            if (typeof carts !== 'undefined') {
+                carts.forEach((c, i) => {
+                    const pct = Math.max(0, Math.round(c.hp / c.maxHealth * 100));
+                    structureBar(wrap, `cart-status-${i}`, `Carro ${i + 1}: ${c.crates.length}/${CART_CRATE_CAP} cajas · ${c.crew.length} abordo`,
+                        '<i class="fa-solid fa-truck-pickup text-emerald-300 mr-1"></i>', pct, `${pct}%`);
+                    aliveIds.push(`cart-status-${i}`);
+                });
+            }
             Array.from(wrap.children).forEach(ch => {
                 if (!aliveIds.includes(ch.id)) wrap.removeChild(ch);
             });
