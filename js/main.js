@@ -114,6 +114,8 @@ function init3DWorld() {
 
         function stepGame(fixedDelta) {
             frameDelta = Math.min(0.1, fixedDelta);
+            gameTime += fixedDelta; // reloj de simulacion
+            safeStep('carros', function (d) { if (typeof updateCarts === 'function') updateCarts(d); }, fixedDelta);
             safeStep('supervivientes', updateSurvivorAI, fixedDelta);
             safeStep('zombies', updateZombieAI, fixedDelta);
             safeStep('proyectiles', updateProjectiles, fixedDelta);
