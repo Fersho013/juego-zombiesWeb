@@ -544,6 +544,42 @@
             overrunShelter(zoneKey); // sin deposito, el refugio cae
         }
 
+        // ==========================================================
+        // CARRO DE CARGA: chasis mediano con caja (6 cajas, 4 tripulantes)
+        // ==========================================================
+        function createCartMesh() {
+            const g = new THREE.Group();
+            const olive = new THREE.MeshStandardMaterial({ color: 0x5b6236, roughness: 0.8, metalness: 0.2 });
+            const darkMetal = new THREE.MeshStandardMaterial({ color: 0x1f2937, metalness: 0.6, roughness: 0.4 });
+            const glassMat = new THREE.MeshStandardMaterial({ color: 0x38bdf8, roughness: 0.2, metalness: 0.4 });
+            function cpart(geo, mat, x, y, z) {
+                const m = new THREE.Mesh(geo, mat);
+                m.position.set(x, y, z);
+                m.castShadow = true;
+                g.add(m);
+                return m;
+            }
+            cpart(new THREE.BoxGeometry(2.6, 0.5, 4.6), darkMetal, 0, 0.7, 0); // chasis
+            cpart(new THREE.BoxGeometry(2.6, 1.1, 2.6), olive, 0, 1.5, 1.0); // caja de carga
+            cpart(new THREE.BoxGeometry(2.4, 0.15, 2.4), darkMetal, 0, 2.1, 1.0); // tapa
+            cpart(new THREE.BoxGeometry(2.2, 1.1, 1.4), olive, 0, 1.4, -1.6); // cabina
+            cpart(new THREE.BoxGeometry(2.0, 0.6, 0.15), glassMat, 0, 1.6, -0.95); // parabrisas
+            const lampL = new THREE.Mesh(new THREE.SphereGeometry(0.12, 6, 6), new THREE.MeshBasicMaterial({ color: 0xfde68a }));
+            lampL.position.set(-0.8, 1.0, -2.32);
+            const lampR = lampL.clone();
+            lampR.position.x = 0.8;
+            g.add(lampL, lampR);
+            const wheelGeo = new THREE.CylinderGeometry(0.5, 0.5, 0.4, 12);
+            [[-1.35, -1.5], [1.35, -1.5], [-1.35, 1.5], [1.35, 1.5]].forEach(([x, z]) => {
+                const w = new THREE.Mesh(wheelGeo, darkMetal);
+                w.rotation.z = Math.PI / 2;
+                w.position.set(x, 0.5, z);
+                w.castShadow = true;
+                g.add(w);
+            });
+            return g;
+        }
+
         // Casa-refugio de 4 muros (puertas + ventanas): cada muro es barricada con HP
         function createShelterHouse(zoneKey) {
             const zone = ZONES[zoneKey];
