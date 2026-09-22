@@ -157,6 +157,18 @@
             return false;
         }
 
+        // Limpieza agresiva: en oleada activa y 12s sin bajas, ir a cazar
+        // rezagados (evita rondas eternas con zombies mordiendo lejos).
+        function stallCleanupHunt(s, homeZone) {
+            if (!isWaveActive || zombiesAliveCount <= 0) return false;
+            if (gameTime - lastKillAt < 12) return false;
+            const prey = nearestZombieOfClass(s.position, 220, ['BASIC', 'MEDIUM', 'LARGE']);
+            if (!prey) return false;
+            s.thoughtText = 'Limpiando rezagados... ¡a por ellos!';
+            moveTowards(s, prey.position, 0.14);
+            return true;
+        }
+
         function pickCombatTarget(s, range) {
             const ALL = ['BASIC', 'MEDIUM', 'LARGE'];
             // 1) Proteger aliados acosados (zombie pegado a un compañero)
@@ -242,6 +254,7 @@
                         return; // tripulacion: la mueve updateTank
                     }
                 }
+                if (s.cartRole) { animateEntityLimbs(s, delta); return; } // en carro: lo mueve updateCarts
 
                 s.shootCooldown = Math.max(0, s.shootCooldown - delta);
                 s.grenadeCooldown = Math.max(0, (s.grenadeCooldown || 0) - delta * gameSpeed);
@@ -294,6 +307,7 @@
                 if (healBusy) s.task = 'curar'; // individual prioritaria
 
                 if (isWaveActive) {
+                    if (s.cartRole) dismountSurvivorFromCart(s); // a combatir a pie
                     const homeZone = ZONES[s.homeZoneKey] && ZONES[s.homeZoneKey].intact ? ZONES[s.homeZoneKey] : ZONES[activeShelterKeys[0] || 'MALL'];
                     const nearbyZ = countNearbyZombies(homeZone.pos, homeZone.radius + 14);
                     const garrisonAlive = Math.max(1, countAliveGarrison(s.homeZoneKey));
@@ -334,6 +348,8 @@
                         if (s.tankRole) {
                             s.task = 'tanque';
                             s.isMoving = false;
+                        } else if (!s.onTower && stallCleanupHunt(s, homeZone)) {
+                            s.task = 'cazar'; // oleada estancada: limpieza agresiva
                         } else if (!updateTowerOccupy(s, homeZone)) {
                             s.aiState = 'DEFEND_BASE';
                             s.task = 'defender';
@@ -419,10 +435,14 @@
                             } else if (s.tankCommitted) {
                                 if (updateTankWork(s, delta, homeZone)) { s.task = 'tanque-build'; handled = true; }
                                 else s.tankCommitted = false;
+                            } else if (s.cartCommitted) {
+                                if (updateCartWork(s, delta, homeZone)) { s.task = 'carro-build'; handled = true; }
+                                else s.cartCommitted = false;
                             }
                             // 2) Rally: obra activa y sin recoleccion urgente -> todos se suman
                             if (!handled && groupTaskActive() && !anyFreeCrate(s)) {
                                 if (shelterFounder && updateShelterFound(s, delta)) { s.task = 'fundar'; handled = true; }
+                                else if (cartBuild && updateCartWork(s, delta, homeZone)) { s.task = 'carro-build'; handled = true; }
                                 else if (findTowerSite() && updateTowerWork(s, delta, homeZone)) { s.task = 'torre'; handled = true; }
                                 else if ((tank.build || tank.parts.length > 0) && !tank.unit && updateTankWork(s, delta, homeZone)) { s.task = 'tanque-build'; handled = true; }
                             }
@@ -438,6 +458,8 @@
                                     s.task = 'dummie'; // individual (señuelo explosivo)
                                 } else if (updateShelterRepair(s, delta)) {
                                     s.task = 'reparar'; // individual (mejorar refugio)
+                                } else if (updateCartWork(s, delta, homeZone)) {
+                                    s.task = 'carro-build'; // grupal (receta 4x100)
                                 } else if (updateShelterFound(s, delta)) {
                                     s.task = 'fundar'; // grupal
                                 } else if (updateTowerWork(s, delta, homeZone)) {
@@ -624,6 +646,7 @@
         // Caja libre = no recogida Y no reservada por otro vivo.
         // Asi cada superviviente va por una caja distinta y no pierden tiempo.
         function isCrateReserved(c, self) {
+            if (c.cartClaim) return true; // apartada por un carro de carga
             for (const o of survivors) {
                 if (o === self || o.health <= 0) continue;
                 if (o.targetCrate === c || o.carriedCrate === c) return true;
@@ -669,7 +692,7 @@
         }
 
         function groupTaskActive() {
-            return !!(findTowerSite() || shelterFounder);
+            return !!(findTowerSite() || shelterFounder || cartBuild);
         }
 
         function pickupCrate(survivor, crate) {
@@ -681,10 +704,7 @@
             updateUI();
         }
 
-        function depositCrateAtBase(survivor) {
-            if (!survivor.carriedCrate) return;
-            const crateType = survivor.carriedCrate.typeKey;
-
+        function grantCrateReward(survivor, crateType, crateName, viaCart) {
             if (crateType === 'WEAPON') { baseResources.ammo += 2; survivor.ammo = Math.min(250, survivor.ammo + 50); }
             else if (crateType === 'MED') { baseResources.meds += 2; survivor.medkits = Math.min(5, (survivor.medkits || 0) + 2); survivor.health = Math.min(survivor.maxHealth, survivor.health + 20); }
             else if (crateType === 'FOOD') baseResources.food += 2;
@@ -697,16 +717,23 @@
             else if (crateType === 'SNIPER') { equipPrimary(survivor, 'SNIPER'); survivor.ammo = Math.min(250, survivor.ammo + 30); baseResources.ammo += 1; }
             else if (crateType === 'GRENADE') { survivor.grenades = Math.min(8, survivor.grenades + 3); survivor.heavy = `Granadas (${survivor.grenades})`; baseResources.heavy += 1; }
 
-            addLogEvent(`${survivor.name} entregó ${survivor.carriedCrate.config.name} al Refugio.`);
-            survivor.carriedCrate = null;
-            survivor.targetCrate = null;
-
+            addLogEvent(viaCart ? `${survivor.name} descargó ${crateName} del carro.` : `${survivor.name} entregó ${crateName} al Refugio.`);
             survivor.health = Math.min(survivor.maxHealth, survivor.health + 20);
             if (crateType === 'MED' || crateType === 'FOOD') survivor.ammo = Math.min(250, survivor.ammo + 50);
 
             playSound('pickup');
             if (typeof refreshDepotStockVisual === 'function') refreshDepotStockVisual(survivor.homeZoneKey);
             updateUI();
+        }
+
+        function depositCrateAtBase(survivor) {
+            if (!survivor.carriedCrate) return;
+            const crateType = survivor.carriedCrate.typeKey;
+            const crateName = survivor.carriedCrate.config.name;
+
+            grantCrateReward(survivor, crateType, crateName, false);
+            survivor.carriedCrate = null;
+            survivor.targetCrate = null;
         }
 
         function equipPrimary(survivor, weaponKey) {
@@ -1082,6 +1109,7 @@
                 if (s.towerCommitted) { s.towerCommitted = false; return false; } // la obra ya no existe
                 if (anyFreeCrate(s)) return false; // recoleccion urgente primero al abrir tajo
                 if (countCompleteTowers() >= TOWER_MAX) return false;
+                if (cartsDone() < towersDone() + 1) return false; // orden: torre#n requiere carro#n
                 // Fundar obra junto al refugio principal (15 escombro del deposito)
                 if ((baseResources.debris || 0) < TOWER_DEBRIS_COST) return false;
                 const ang = Math.random() * Math.PI * 2;
@@ -1124,6 +1152,7 @@
             const mainZone = (ZONES[mainShelterKey] && ZONES[mainShelterKey].isActiveShelter) ? ZONES[mainShelterKey] : homeZone;
             if (!tank.build) {
                 if (!s.tankCommitted && anyFreeCrate(s)) return false; // recoleccion urgente primero
+                if (cartsDone() < 2 || towersDone() < 2) return false; // tanque al final de la fila
                 if ((baseResources.debris || 0) < TANK_PART_COST) return false;
                 if (!tank.yard) {
                     const a = Math.random() * Math.PI * 2;
@@ -1200,6 +1229,310 @@
             s.thoughtText = `Reparando blindaje ${Math.round(T.armor)}/${TANK_ARMOR}`;
             s.task = 'reparar-tanque';
             return true;
+        }
+
+        // ==========================================================
+        // CARRO DE CARGA (receta 4x100=400): max 2, 4 tripulantes, 6 cajas.
+        // Orden grupal: carro1 > torre1 > carro2 > torre2 > tanque.
+        // ==========================================================
+        function cartsDone() { return carts.length + (cartBuild ? 1 : 0); }
+        function towersDone() { return countCompleteTowers() + (findTowerSite() ? 1 : 0); }
+
+        function updateCartWork(s, delta, homeZone) {
+            if (isWaveActive || carts.length >= CART_MAX) return false;
+            const mainZone = (ZONES[mainShelterKey] && ZONES[mainShelterKey].isActiveShelter) ? ZONES[mainShelterKey] : homeZone;
+            if (!cartBuild) {
+                if (!s.cartCommitted && anyFreeCrate(s)) return false;
+                if (!(towersDone() >= cartsDone())) return false; // orden: carro#n requiere n-1 torres
+                if ((baseResources.debris || 0) < CART_PART_COST) return false;
+                const a = Math.random() * Math.PI * 2;
+                const yard = mainZone.pos.clone().add(new THREE.Vector3(Math.cos(a) * 16, 0, Math.sin(a) * 16));
+                yard.y = 0;
+                const scaf = buildTowerScaffoldMesh();
+                scaf.position.copy(yard);
+                scaf.scale.y = 0.2;
+                scene.add(scaf);
+                cartBuild = { cartIdx: carts.length, partIdx: 0, progress: 0, mesh: scaf, yard: yard, waitingMaterial: false };
+                baseResources.debris -= CART_PART_COST;
+                const def = CART_PARTS[0];
+                showAirBanner(`Carro ${carts.length + 1}: ${def.label} en construccion`, 'fa-solid fa-truck-pickup text-amber-300 text-lg');
+                addLogEvent(`Taller del carro ${carts.length + 1}: pieza 1/4 (${def.label}).`);
+                updateUI();
+            } else {
+                if (!s.cartCommitted && anyFreeCrate(s)) return false;
+                if (cartBuild.waitingMaterial) {
+                    if ((baseResources.debris || 0) < CART_PART_COST) {
+                        s.thoughtText = 'Taller en pausa: falta material...';
+                        s.isMoving = false;
+                        return true;
+                    }
+                    baseResources.debris -= CART_PART_COST;
+                    cartBuild.waitingMaterial = false;
+                    const def = CART_PARTS[cartBuild.partIdx];
+                    const scaf = buildTowerScaffoldMesh();
+                    scaf.position.copy(cartBuild.yard);
+                    scaf.scale.y = 0.2;
+                    scene.add(scaf);
+                    cartBuild.mesh = scaf;
+                    addLogEvent(`Carro ${cartBuild.cartIdx + 1}: pieza ${cartBuild.partIdx + 1}/4 (${def.label}).`);
+                }
+            }
+            s.cartCommitted = true;
+            const def = CART_PARTS[cartBuild.partIdx];
+            const d = s.position.distanceTo(cartBuild.yard);
+            if (d > 3) {
+                s.thoughtText = `Yendo al taller del carro (${def.label})...`;
+                moveTowards(s, cartBuild.yard, 0.11);
+                return true;
+            }
+            s.isMoving = false;
+            s.hammering = true;
+            aimTowards(s, cartBuild.yard);
+            cartBuild.progress += delta * gameSpeed;
+            if (cartBuild.mesh) cartBuild.mesh.scale.y = Math.min(1, 0.2 + 0.8 * (cartBuild.progress / CART_PART_WORK));
+            s.thoughtText = `Carro ${def.label} ${Math.floor(cartBuild.progress)}/${CART_PART_WORK}s`;
+            if (cartBuild.progress >= CART_PART_WORK) finishCartPart();
+            return true;
+        }
+
+        function finishCartPart() {
+            if (cartBuild.mesh) scene.remove(cartBuild.mesh);
+            cartBuild.mesh = null;
+            cartBuild.partIdx++;
+            cartBuild.progress = 0;
+            if (cartBuild.partIdx >= CART_PARTS.length) {
+                assembleCart();
+                return;
+            }
+            cartBuild.waitingMaterial = true;
+            updateUI();
+        }
+
+        function assembleCart() {
+            const b = cartBuild;
+            cartBuild = null;
+            if (b && b.mesh) scene.remove(b.mesh);
+            const zone = (ZONES[mainShelterKey] && ZONES[mainShelterKey].isActiveShelter) ? ZONES[mainShelterKey] : ZONES[activeShelterKeys[0]];
+            if (!zone) return;
+            const off = carts.length === 0 ? [7, -7] : [-7, 6];
+            const parkPos = new THREE.Vector3(zone.pos.x + off[0], 0, zone.pos.z + off[1]);
+            const mesh = createCartMesh();
+            mesh.position.copy(parkPos);
+            scene.add(mesh);
+            carts.push({
+                mesh: mesh, pos: parkPos.clone(), heading: 0,
+                hp: CART_HP, maxHealth: CART_HP,
+                crates: [], crew: [], targetCrate: null,
+                parkZone: zone.key, parkPos: parkPos.clone(), moving: false
+            });
+            survivors.forEach(s => { s.cartCommitted = false; });
+            showAirBanner(`¡CARRO DE CARGA ${carts.length} LISTO!`, 'fa-solid fa-truck-pickup text-emerald-300 text-lg');
+            addLogEvent(`¡Carro de carga ${carts.length} ensamblado! Hasta 6 cajas por viaje.`);
+            showToast('Carro de carga operativo.');
+            updateUI();
+        }
+
+        // Dotacion: 3+2 con dos carros; con uno van 2, o 4 si el equipo esta libre
+        function teamFreeForCart() {
+            if (groupTaskActive() || mostDamagedShelter()) return false;
+            for (const k of activeShelterKeys) {
+                if (perimeterHasFreeSpot(k)) return false;
+            }
+            return true;
+        }
+
+        function desiredCartCrew(cart, ci) {
+            if (carts.length >= 2) return ci === 0 ? 3 : 2; // reparto 3+2
+            if (teamFreeForCart()) return 4; // equipo libre: todos al carro
+            return 2;
+        }
+
+        function boardCart(cart, s) {
+            if (!cart || s.cartRole === cart || s.health <= 0) return;
+            if (s.cartRole) dismountSurvivorFromCart(s);
+            cart.crew.push(s);
+            s.cartRole = cart;
+            s.targetCrate = null; // libera su reserva personal: recolecta via carro
+            s.thoughtText = '¡Al carro, a recolectar!';
+            const pack = s.mesh ? s.mesh.getObjectByName('carry-pack') : null;
+            if (pack && pack.parent) pack.parent.remove(pack);
+        }
+
+        function dismountSurvivorFromCart(s) {
+            const cart = s.cartRole;
+            if (!cart) return;
+            const i = cart.crew.indexOf(s);
+            if (i > -1) cart.crew.splice(i, 1);
+            s.cartRole = null;
+            const a = Math.random() * Math.PI * 2;
+            s.position.set(cart.pos.x + Math.cos(a) * 3, 0, cart.pos.z + Math.sin(a) * 3);
+            s.position.y = 0;
+            if (s.mesh) s.mesh.visible = true;
+            s.isMoving = false;
+            s.thoughtText = 'De vuelta a pie.';
+        }
+
+        function dismountCart(cart) {
+            cart.crew.slice().forEach(dismountSurvivorFromCart);
+            releaseCartClaim(cart);
+        }
+
+        function releaseCartClaim(cart) {
+            if (cart.targetCrate) { cart.targetCrate.cartClaim = null; cart.targetCrate = null; }
+        }
+
+        function nearestCrateForCart(cart) {
+            let best = null, bestD = Infinity;
+            crates.forEach(c => {
+                if (c.isPickedUp) return;
+                if (c.cartClaim && c.cartClaim !== cart) return;
+                if (isCrateReserved(c, null)) return;
+                const d = cart.pos.distanceTo(c.position);
+                if (d < bestD) { bestD = d; best = c; }
+            });
+            return best;
+        }
+
+        function driveCart(cart, dest, g) {
+            const dir = dest.clone().sub(cart.pos); dir.y = 0;
+            if (dir.length() > 0.5) {
+                dir.normalize();
+                cart.pos.addScaledVector(dir, 12 * g);
+                cart.heading = Math.atan2(dir.x, dir.z);
+                cart.moving = true;
+            } else cart.moving = false;
+            cart.mesh.position.copy(cart.pos);
+            cart.mesh.rotation.y = cart.heading || 0;
+        }
+
+        function driveCartToTarget(cart, g) {
+            const t = cart.targetCrate;
+            if (!t) return;
+            if (t.isPickedUp) { releaseCartClaim(cart); return; }
+            const d = cart.pos.distanceTo(t.position);
+            if (d > 3) {
+                driveCart(cart, t.position, g);
+            } else if (cart.crates.length < CART_CRATE_CAP) {
+                t.isPickedUp = true;
+                if (t.mesh) scene.remove(t.mesh);
+                t.cartClaim = null;
+                cart.targetCrate = null;
+                cart.crates.push({ typeKey: t.typeKey, name: t.config.name });
+                const loader = cart.crew[1] || cart.crew[0];
+                if (loader) loader.thoughtText = `Caja al carro (${cart.crates.length}/${CART_CRATE_CAP})`;
+                playSound('pickup');
+                updateUI();
+            }
+        }
+
+        function returnCartToPark(cart, g, unload) {
+            const zone = ZONES[cart.parkZone];
+            if (!zone || !zone.isActiveShelter) {
+                const fb = ZONES[activeShelterKeys[0]] || ZONES['MALL'];
+                cart.parkZone = fb.key;
+                cart.parkPos = new THREE.Vector3(fb.pos.x + 6, 0, fb.pos.z - 6);
+            }
+            if (cart.pos.distanceTo(cart.parkPos) > 4) {
+                driveCart(cart, cart.parkPos, g);
+                return;
+            }
+            cart.moving = false;
+            cart.mesh.position.copy(cart.pos);
+            if (unload && cart.crates.length) unloadCart(cart);
+            if (!nearestCrateForCart(cart)) dismountCart(cart); // sin faena: equipo libre
+        }
+
+        function unloadCart(cart) {
+            const driver = cart.crew[0] || closestKillerTo(cart.pos, 40);
+            cart.crates.forEach(c => {
+                if (driver && driver.health > 0) grantCrateReward(driver, c.typeKey, c.name, true);
+                else {
+                    if (c.typeKey === 'WEAPON') baseResources.ammo += 2;
+                    else if (c.typeKey === 'MED') baseResources.meds += 2;
+                    else if (c.typeKey === 'FOOD') baseResources.food += 2;
+                    else if (c.typeKey === 'HEAVY' || c.typeKey === 'GRENADE') baseResources.heavy += 1;
+                    else if (c.typeKey === 'MATERIAL') baseResources.debris = Math.min(DEPOT_DEBRIS_CAP, (baseResources.debris || 0) + 60);
+                    else if (c.typeKey === 'ARMOR' || c.typeKey === 'RIFLE' || c.typeKey === 'SHOTGUN' || c.typeKey === 'SNIPER') baseResources.ammo += 1;
+                }
+            });
+            if (cart.crates.length) addLogEvent(`Carro descargado en el refugio: ${cart.crates.length} cajas.`);
+            cart.crates.length = 0;
+            if (driver) refreshDepotStockVisual(driver.homeZoneKey);
+            updateUI();
+        }
+
+        function destroyCart(cart) {
+            const i = carts.indexOf(cart);
+            if (i > -1) carts.splice(i, 1);
+            cart.crew.slice().forEach(s => {
+                dismountSurvivorFromCart(s);
+                if (s.health > 0) s.health = Math.max(1, s.health - 20);
+            });
+            if (cart.targetCrate) cart.targetCrate.cartClaim = null;
+            scene.remove(cart.mesh);
+            explodeAt(cart.pos.clone(), 6, 60, null);
+            addLogEvent('¡Un carro de carga fue destruido! Se podra construir otro.');
+            showToast('Carro destruido.');
+            updateUI();
+        }
+
+        function nearestCart(pos, range) {
+            let best = null, bestD = range;
+            carts.forEach(c => {
+                const dx = pos.x - c.pos.x, dz = pos.z - c.pos.z;
+                const d = Math.hypot(dx, dz);
+                if (d < bestD) { bestD = d; best = c; }
+            });
+            return best;
+        }
+
+        // Logistica: dotacion, rutas, carga, retorno y descarga (solo sin oleada)
+        function updateCarts(dt) {
+            const g = dt * Math.max(0.001, gameSpeed);
+            if (isWaveActive) {
+                carts.forEach(c => { if (c.crew.length) dismountCart(c); });
+                return;
+            }
+            carts.forEach((cart, ci) => {
+                cart.crew.slice().forEach(s => {
+                    if (s.health <= 0 || s.tankRole) dismountSurvivorFromCart(s);
+                });
+                const want = desiredCartCrew(cart, ci);
+                while (cart.crew.length > want) dismountSurvivorFromCart(cart.crew[cart.crew.length - 1]);
+                if (cart.crew.length < want) {
+                    for (const s of survivors) {
+                        if (cart.crew.length >= want) break;
+                        if (s.health > 0 && !s.cartRole && !s.tankRole && !s.onTower && s.aiState !== 'FLEE') boardCart(cart, s);
+                    }
+                }
+                if (!cart.crew.length) return;
+                if (cart.crates.length >= CART_CRATE_CAP) returnCartToPark(cart, g, true);
+                else {
+                    if (!cart.targetCrate || cart.targetCrate.isPickedUp) {
+                        releaseCartClaim(cart);
+                        cart.targetCrate = nearestCrateForCart(cart);
+                        if (cart.targetCrate) cart.targetCrate.cartClaim = cart;
+                    }
+                    if (!cart.targetCrate) returnCartToPark(cart, g, cart.crates.length > 0);
+                    else driveCartToTarget(cart, g);
+                }
+                // Tripulacion a bordo (conductor visible, resto dentro)
+                cart.crew.forEach((s, i) => {
+                    if (i === 0) {
+                        const fx = Math.sin(cart.heading || 0), fz = Math.cos(cart.heading || 0);
+                        s.position.set(cart.pos.x - fx * 1.6, 0, cart.pos.z - fz * 1.6);
+                        if (s.mesh) s.mesh.visible = true;
+                        aimTowards(s, cart.pos);
+                    } else {
+                        s.position.copy(cart.pos);
+                        if (s.mesh) s.mesh.visible = false;
+                    }
+                    s.isMoving = cart.moving;
+                    if (!s.thoughtText || s.thoughtText.indexOf('Caja al carro') !== 0) {
+                        s.thoughtText = cart.moving ? 'Recolectando en carro...' : 'Cargando el carro...';
+                    }
+                });
+            });
         }
 
         // ==========================================================
@@ -1360,6 +1693,7 @@
             z.burned = false;
             dyingZombies.push(z);
             zombiesAliveCount = Math.max(0, zombiesAliveCount - 1);
+            lastKillAt = gameTime; // racha de caza: resetea el reloj de limpieza
             if (ownerSurvivor && ownerSurvivor.health > 0) ownerSurvivor.kills++;
             // Loot en el punto de caida
             if (Math.random() < LOOT_CHANCE) {
@@ -1449,6 +1783,7 @@
             });
             dummies.forEach(d => { if (d.health > 0) cols.push({ x: d.position.x, z: d.position.z, r: 0.9 }); });
             if (tank.unit) cols.push({ x: tank.unit.pos.x, z: tank.unit.pos.z, r: 3.5 });
+            carts.forEach(c => cols.push({ x: c.pos.x, z: c.pos.z, r: 2.5 }));
             activeShelterKeys.forEach(k => {
                 const zz = ZONES[k];
                 cols.push({ x: zz.pos.x, z: zz.pos.z, r: 4 });
@@ -1499,6 +1834,22 @@
                         animateEntityLimbs(z, delta);
                         continue;
                     }
+                }
+
+                // Carro de carga en contacto: tambien lo golpean
+                const nearCart = nearestCart(z.position, 4.5);
+                if (nearCart) {
+                    moveTowards(z, nearCart.pos, z.speed);
+                    const cdx = z.position.x - nearCart.pos.x, cdz = z.position.z - nearCart.pos.z;
+                    if (Math.hypot(cdx, cdz) < 4.0 && z.attackCooldown <= 0) {
+                        nearCart.hp -= z.damage;
+                        z.attackCooldown = 1.3;
+                        aimTowards(z, nearCart.pos);
+                        createMuzzleFlash(nearCart.pos, 0x92400e, 0.08);
+                        if (nearCart.hp <= 0) destroyCart(nearCart);
+                    }
+                    animateEntityLimbs(z, delta);
+                    continue;
                 }
 
                 // P1 DUMMIE BOMBA: el señuelo favorito, lo huelen a distancia
@@ -1669,6 +2020,13 @@
                 zone.depot.stockMeshes.forEach(m => scene.remove(m));
                 zone.depot = null;
             }
+            carts.forEach(c => {
+                if (c.parkZone === zoneKey) {
+                    const fb = ZONES[activeShelterKeys[0]] || ZONES['MALL'];
+                    c.parkZone = fb.key;
+                    c.parkPos = new THREE.Vector3(fb.pos.x + 6, 0, fb.pos.z - 6);
+                }
+            });
 
             addLogEvent(`¡EL REFUGIO EN ${zone.name.toUpperCase()} HA SIDO DESTRUIDO!`);
             if (zoneKey === mainShelterKey) {
