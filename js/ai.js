@@ -259,6 +259,7 @@
                 s.shootCooldown = Math.max(0, s.shootCooldown - delta);
                 s.grenadeCooldown = Math.max(0, (s.grenadeCooldown || 0) - delta * gameSpeed);
                 s.craftCooldown = Math.max(0, (s.craftCooldown || 0) - delta * gameSpeed);
+                s.cartCooldown = Math.max(0, (s.cartCooldown || 0) - delta * gameSpeed); // turno rotativo del carro
                 s.flareCooldown = Math.max(0, (s.flareCooldown || 0) - delta * gameSpeed);
                 s.healFXTimer = Math.max(0, (s.healFXTimer || 0) - delta * gameSpeed);
 
@@ -1192,9 +1193,10 @@
 
         function finishTankPart() {
             const def = TANK_PARTS[tank.build.idx];
+            const yard = tank.build.yard ? tank.build.yard.clone() : new THREE.Vector3();
             if (tank.build.mesh) scene.remove(tank.build.mesh);
             tank.parts.push(def.key);
-            if (def.turret) deployEmplacement(def.key);
+            if (def.turret) deployEmplacement(def.key, yard.x, yard.z); // queda en el taller
             else addLogEvent(`Pieza del tanque lista (${tank.parts.length}/5): ${def.label}.`);
             showToast(`Pieza del tanque (${tank.parts.length}/5): ${def.label}`);
             tank.build = null;
@@ -1211,7 +1213,7 @@
                 return false;
             }
             if (!s.tankRepair) {
-                if (survivors.some(o => o !== s && o.tankRepair)) return false; // uno a la vez
+                if (survivors.some(o => o !== s && o.tankRepair && o.health > 0)) return false; // uno a la vez (vivo)
                 if (s.role !== 'Ingeniero' && Math.random() > 0.01 * gameSpeed) return false;
                 s.tankRepair = true;
                 addLogEvent(`${s.name} se encarga de reparar el blindaje del tanque.`);
@@ -1314,13 +1316,16 @@
             if (b && b.mesh) scene.remove(b.mesh);
             const zone = (ZONES[mainShelterKey] && ZONES[mainShelterKey].isActiveShelter) ? ZONES[mainShelterKey] : ZONES[activeShelterKeys[0]];
             if (!zone) return;
+            // El carro aparece DONDE se construyo (el taller); luego rueda a estacionarse
+            const spawnPos = b && b.yard ? b.yard.clone() : new THREE.Vector3(zone.pos.x, 0, zone.pos.z);
+            spawnPos.y = 0;
             const off = carts.length === 0 ? [7, -7] : [-7, 6];
             const parkPos = new THREE.Vector3(zone.pos.x + off[0], 0, zone.pos.z + off[1]);
             const mesh = createCartMesh();
-            mesh.position.copy(parkPos);
+            mesh.position.copy(spawnPos);
             scene.add(mesh);
             carts.push({
-                mesh: mesh, pos: parkPos.clone(), heading: 0,
+                mesh: mesh, pos: spawnPos.clone(), heading: 0,
                 hp: CART_HP, maxHealth: CART_HP,
                 crates: [], crew: [], targetCrate: null,
                 parkZone: zone.key, parkPos: parkPos.clone(), moving: false
@@ -1438,7 +1443,12 @@
             }
             cart.moving = false;
             cart.mesh.position.copy(cart.pos);
-            if (unload && cart.crates.length) unloadCart(cart);
+            if (unload && cart.crates.length) {
+                unloadCart(cart);
+                // Rotacion: la tripulacion queda libre como los demas (25s sin reabordar)
+                cart.crew.slice().forEach(s => { s.cartCooldown = 25; });
+                dismountCart(cart);
+            }
             if (!nearestCrateForCart(cart)) dismountCart(cart); // sin faena: equipo libre
         }
 
@@ -1502,7 +1512,7 @@
                 if (cart.crew.length < want) {
                     for (const s of survivors) {
                         if (cart.crew.length >= want) break;
-                        if (s.health > 0 && !s.cartRole && !s.tankRole && !s.onTower && s.aiState !== 'FLEE') boardCart(cart, s);
+                        if (s.health > 0 && !s.cartRole && !s.tankRole && !s.onTower && s.aiState !== 'FLEE' && !(s.cartCooldown > 0)) boardCart(cart, s);
                     }
                 }
                 if (!cart.crew.length) return;
