@@ -116,7 +116,7 @@
     </header>
 
     <!-- Left Sidebar: Spectator Interventions & Base Info -->
-    <aside class="absolute left-3 top-20 bottom-4 w-16 md:w-64 glass-panel rounded-3xl p-3 z-20 flex flex-col justify-between overflow-y-auto">
+    <aside id="mobile-panel-left" class="absolute left-3 top-20 bottom-4 w-16 md:w-64 glass-panel rounded-3xl p-3 z-20 flex flex-col justify-between overflow-y-auto">
         <div>
             <h2 class="text-[11px] font-extrabold uppercase tracking-wider text-red-400 mb-2.5 hidden md:flex items-center justify-between">
                 <span><i class="fa-solid fa-hand-holding-hand mr-1"></i> Intervenciones</span>
@@ -213,7 +213,7 @@
     </aside>
 
     <!-- Right Sidebar: 5 Survivors Roster & Inspector -->
-    <aside class="absolute right-3 top-20 bottom-4 w-80 glass-panel rounded-3xl p-4 z-20 flex flex-col justify-between overflow-y-auto shadow-2xl">
+    <aside id="mobile-panel-right" class="absolute right-3 top-20 bottom-4 w-80 glass-panel rounded-3xl p-4 z-20 flex flex-col justify-between overflow-y-auto shadow-2xl">
         <div>
             <!-- Survivors Tabs Selector -->
             <div class="flex items-center justify-between mb-2">
@@ -348,6 +348,39 @@
             <span id="toast-text">Evento registrado</span>
         </div>
     </aside>
+
+    <!-- Platform Menu (previo): PC o Movil -->
+    <div id="platform-menu" class="flex fixed inset-0 z-[100] items-center justify-center bg-black/80 backdrop-blur-sm">
+        <div class="glass-panel rounded-3xl px-8 py-7 text-center shadow-2xl max-w-sm mx-4">
+            <div class="w-14 h-14 mx-auto mb-3 rounded-2xl bg-gradient-to-tr from-red-600 via-amber-600 to-yellow-500 flex items-center justify-center text-slate-950 text-2xl shadow-lg">
+                <i class="fa-solid fa-biohazard"></i>
+            </div>
+            <h2 class="text-lg font-black tracking-wide text-slate-100 mb-1">SURVIVORS VS ZOMBIES 3D</h2>
+            <p class="text-xs text-slate-400 mb-5">¿Desde donde vas a jugar?</p>
+            <div class="flex gap-2 justify-center">
+                <button onclick="setPlatform('pc')" class="flex-1 px-5 py-3 rounded-2xl bg-gradient-to-r from-red-600 to-amber-600 hover:from-red-500 hover:to-amber-500 text-white font-bold text-sm transition flex items-center justify-center gap-2">
+                    <i class="fa-solid fa-desktop"></i> PC
+                </button>
+                <button onclick="setPlatform('mobile')" class="flex-1 px-5 py-3 rounded-2xl bg-slate-800 hover:bg-emerald-700 border border-emerald-500/40 text-emerald-200 font-bold text-sm transition flex items-center justify-center gap-2">
+                    <i class="fa-solid fa-mobile-screen"></i> Móvil
+                </button>
+            </div>
+            <p class="text-[10px] text-slate-500 mt-3">En móvil se adapta a pantalla horizontal con paneles plegables.</p>
+        </div>
+    </div>
+
+    <!-- Botones flotantes solo-movil para plegar paneles -->
+    <button id="mobile-toggle-left" onclick="toggleMobilePanel('left')" class="hidden fixed left-2 bottom-3 z-40 w-11 h-11 rounded-2xl glass-panel text-amber-300 items-center justify-center shadow-2xl">
+        <i class="fa-solid fa-hand-holding-hand"></i>
+    </button>
+    <button id="mobile-toggle-right" onclick="toggleMobilePanel('right')" class="hidden fixed right-2 bottom-3 z-40 w-11 h-11 rounded-2xl glass-panel text-emerald-300 items-center justify-center shadow-2xl">
+        <i class="fa-solid fa-users"></i>
+    </button>
+
+    <!-- Aviso de rotar a horizontal (solo movil en vertical) -->
+    <div id="rotate-hint">
+        <i class="fa-solid fa-rotate"></i> Gira tu movil a horizontal
+    </div>
 
     <!-- Game Over Overlay -->
     <div id="gameover-overlay" class="hidden fixed inset-0 z-50 items-center justify-center bg-black/70 backdrop-blur-sm">
