@@ -83,6 +83,7 @@
         let cartBuild = null; // {cartIdx, partIdx, progress, mesh, yard}
         let gameTime = 0; // reloj de simulacion (para detectar rachas sin bajas)
         let lastKillAt = 0;
+        let uiMode = 'pc'; // 'pc' o 'mobile' (elegido en el menu previo)
 
         // ==========================================================
         // ZOMBIE TYPES: básico, mediano y grande

@@ -703,13 +703,12 @@ function finishTower(tower) {
         }
 
         // Pieza de torreta lista: emplazamiento automatico junto al refugio principal
-        function deployEmplacement(typeKey) {
-            const zone = (ZONES[mainShelterKey] && ZONES[mainShelterKey].isActiveShelter) ? ZONES[mainShelterKey] : ZONES[activeShelterKeys[0]];
-            if (!zone) return;
+        // Pieza de torreta lista: el emplazamiento queda DONDE se construyo (el taller)
+        function deployEmplacement(typeKey, cx, cz) {
             const i = tank.emplacements.length;
-            const ang = (i / 3) * Math.PI * 2 + 0.5;
-            const px = zone.pos.x + Math.cos(ang) * (zone.radius + 5);
-            const pz = zone.pos.z + Math.sin(ang) * (zone.radius + 5);
+            const ang = i * 2.1;
+            const px = (cx || 0) + Math.cos(ang) * 4;
+            const pz = (cz || 0) + Math.sin(ang) * 4;
             const built = createTurretModel(false);
             built.mesh.scale.setScalar(1.4);
             built.mesh.position.set(px, 0, pz);

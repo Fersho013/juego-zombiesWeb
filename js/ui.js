@@ -309,6 +309,34 @@
         }
 
         // ==========================================================
+        // PLATAFORMA PC / MOVIL (el modo PC no cambia nada existente)
+        // ==========================================================
+        function setPlatform(mode) {
+            uiMode = (mode === 'mobile') ? 'mobile' : 'pc';
+            try { localStorage.setItem('svz-platform', uiMode); } catch (e) {}
+            const menu = document.getElementById('platform-menu');
+            if (menu) { menu.classList.add('hidden'); menu.classList.remove('flex'); }
+            if (uiMode === 'mobile') {
+                document.body.classList.add('mobile-mode');
+                ['mobile-toggle-left', 'mobile-toggle-right'].forEach(id => {
+                    const b = document.getElementById(id);
+                    if (b) { b.classList.remove('hidden'); b.classList.add('flex'); }
+                });
+                addLogEvent('Modo movil activado: paneles plegables y vista horizontal.');
+                showToast('Modo movil: usa los botones laterales para los paneles.');
+            } else {
+                document.body.classList.remove('mobile-mode');
+            }
+            if (typeof onWindowResize === 'function') onWindowResize();
+        }
+
+        function toggleMobilePanel(side) {
+            const id = side === 'left' ? 'mobile-panel-left' : 'mobile-panel-right';
+            const el = document.getElementById(id);
+            if (el) el.classList.toggle('mobile-open');
+        }
+
+        // ==========================================================
         // GAME OVER: cartel con 2 opciones de reintento
         // ==========================================================
         function showGameOver() {

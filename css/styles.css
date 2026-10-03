@@ -70,3 +70,89 @@ body {
         #tower-bars > div {
             animation: pulseAlert 2s infinite ease-in-out;
         }
+
+        /* ==========================================================
+           MODO MOVIL: solo aplica con body.mobile-mode. En PC no
+           cambia absolutamente nada de lo existente.
+           ========================================================== */
+        #canvas-container canvas {
+            touch-action: none; /* gestos tactiles para la camara 3D */
+        }
+        #rotate-hint {
+            display: none;
+        }
+        body.mobile-mode header {
+            top: 0.4rem;
+            left: 0.4rem;
+            right: 0.4rem;
+            gap: 0.4rem;
+            flex-wrap: nowrap;
+            overflow-x: auto;
+            scrollbar-width: none;
+        }
+        body.mobile-mode header::-webkit-scrollbar {
+            display: none;
+        }
+        body.mobile-mode header > div {
+            padding: 0.4rem 0.6rem !important;
+            gap: 0.5rem;
+            flex-shrink: 0;
+        }
+        body.mobile-mode header h1 {
+            font-size: 0.7rem;
+        }
+        body.mobile-mode header p,
+        body.mobile-mode header .hidden.md\:inline {
+            display: none;
+        }
+        body.mobile-mode #mobile-panel-left,
+        body.mobile-mode #mobile-panel-right {
+            top: 4.2rem;
+            bottom: 4.2rem;
+            z-index: 45;
+            transition: transform 0.25s ease;
+        }
+        body.mobile-mode #mobile-panel-left {
+            width: 15rem;
+            transform: translateX(-115%);
+        }
+        body.mobile-mode #mobile-panel-right {
+            width: 16rem;
+            transform: translateX(115%);
+        }
+        body.mobile-mode #mobile-panel-left.mobile-open,
+        body.mobile-mode #mobile-panel-right.mobile-open {
+            transform: none;
+        }
+        body.mobile-mode #tower-bars {
+            width: 14rem;
+            top: 4.2rem;
+        }
+        body.mobile-mode #air-banner-text {
+            font-size: 0.65rem;
+        }
+        body.mobile-mode .thought-bubble {
+            font-size: 9px;
+            padding: 0.2rem 0.5rem;
+        }
+        body.mobile-mode #rotate-hint {
+            position: fixed;
+            left: 50%;
+            bottom: 3.5rem;
+            transform: translateX(-50%);
+            z-index: 60;
+            background: rgba(10, 15, 29, 0.9);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            color: #fde68a;
+            font-size: 11px;
+            font-weight: bold;
+            border-radius: 9999px;
+            padding: 0.4rem 0.9rem;
+            align-items: center;
+            gap: 0.4rem;
+        }
+        @media (orientation: portrait) {
+            body.mobile-mode #rotate-hint {
+                display: flex;
+            }
+        }
