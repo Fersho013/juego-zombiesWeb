@@ -178,5 +178,26 @@
 
         let selectedSurvivorIndex = 0;
 
+        // ==========================================================
+        // OUTPOSTS / TORRETAS MANUALES / TRAMPAS (serie inventario+base)
+        // - outposts: refugios nuevos con perimetro definible (centro, radio,
+        //   anillo visible, plots fijos: almacen, torres, paredes, trampas, torretas)
+        // - turretPosts: torretas sueltas colocadas por el jugador (auto-fuego)
+        // - traps: pinchos que dañan zombies en area
+        // ==========================================================
+        const outposts = []; // {id, zoneKey, center:V3, radius, ring, plots:{depot, towers[], walls, traps, turrets}}
+        const turretPosts = []; // {mesh, head, pos, kind, cooldown, range, damage, fireRate}
+        const traps = []; // {mesh, pos, cooldown, range, damage}
+        let outpostSeq = 0;
+        const TURRET_POST_STATS = {
+            RAPID: { label: 'Torreta rápida',  range: 30, cooldown: 0.35, dmg: [25, 40],  color: 0xfacc15 },
+            MG:    { label: 'Torreta MG',      range: 36, cooldown: 0.09, dmg: [18, 30],  color: 0x4ade80 },
+            MISSILES: { label: 'Torreta misiles', range: 30, cooldown: 2.2, dmg: [90, 130], color: 0xef4444 }
+        };
+        const MG_TOWER_STATS = { range: 38, cooldown: 0.09, dmg: [18, 32], color: 0x4ade80 };
+        const MG_TOWER_COST = 25;
+        const MG_TOWER_WORK = 300;
+        const OUTPOST_RADIUS = { S: 14, M: 20, L: 26 };
+
         // Audio Synthesizer Engine
         let synthGun, synthExplosion, synthPickup, synthZombie, synthTurret;
