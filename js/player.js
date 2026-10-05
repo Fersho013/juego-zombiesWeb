@@ -189,13 +189,31 @@ function isParticipantActive() {
 // ============================================================
 let playerInputBound = false;
 // Carro deshabilitado temporalmente: no se ofrece ni lo construye la IA (ver CART_DISABLED)
+// mg-tower/turret_*/trap/wall los ejecuta js/outpost.js (quedan FIJOS donde se fundan)
 const BUILD_RECIPES = [
     { key: 'tower',     label: 'Torre vigía',        cost: 15,  work: 400, desc: 'Plataforma francotirador (400s)' },
+    { key: 'mg-tower',  label: 'Torre ametralladora', cost: 25, work: 300, desc: 'MG usable jugador/NPC (alta cadencia)' },
+    { key: 'turret_rapid',    label: 'Torreta rápida',  cost: 40, work: 0, desc: 'Auto-fuego cadencia media' },
+    { key: 'turret_mg',       label: 'Torreta MG',      cost: 60, work: 0, desc: 'Auto-fuego alta cadencia + DMG' },
+    { key: 'turret_missiles', label: 'Torreta misiles', cost: 55, work: 0, desc: 'Daño en área' },
     { key: 'perimeter', label: 'Tramo perímetro',    cost: 10,  work: 40,  desc: 'Barricada del refugio (rápida)' },
-    { key: 'shelter',   label: 'Fundar refugio',     cost: 30,  work: 120, desc: 'Nueva casa-refugio (120s)' },
-    { key: 'tank',      label: 'Pieza de tanque',    cost: 500, work: 300, desc: 'Tanque 5x500 (arma final)' },
+    { key: 'wall',      label: 'Pared reforzada',    cost: 8,   work: 0,   desc: 'Muro 300 HP (fijo)' },
+    { key: 'trap',      label: 'Trampa pinchos',     cost: 5,   work: 0,   desc: 'Daña horda en área (fija)' },
+    { key: 'shelter',   label: 'Refugio nuevo + perímetro', cost: 30, work: 120, desc: 'Pide radio S/M/L y diseñador' },
+    { key: 'tank',      label: 'Pieza de tanque + patio', cost: 500, work: 300, desc: 'Define patio 12m: torretas/ruedas' },
     { key: 'dummy',     label: 'Dummie bomba',       cost: 20,  work: 4,   desc: 'Señuelo explosivo (+1 granada)' }
 ];
+
+// ---------- Mouse libre en menús ----------
+// Con menú abierto se suelta el pointer-lock para poder clicar;
+// al cerrar, el siguiente click en el canvas vuelve al gameplay (CoD).
+function isAnyMenuOpen() {
+    return isBuildMenuOpen() || isWeaponMenuOpen() || isInventoryMenuOpen() || isOutpostMenuOpen();
+}
+function releasePointerForMenu() {
+    try { if (document.pointerLockElement) document.exitPointerLock(); } catch (e) {}
+    playerInput.aiming = false;
+}
 
 function initPlayerInput() {
     if (playerInputBound) return;
@@ -217,6 +235,9 @@ function initPlayerInput() {
         if (k === 'f') playerHealAlly();     // curar pasa a F
         if (k === 'x') toggleHelpNPC();       // aportar a obra de NPCs
         if (k === 'z') toggleTowerMount();   // subir/bajar torre
+        if (k === 'i') toggleInventoryMenu(); // inventario
+        if (k === 'o') toggleOutpostMenu();   // diseñador refugio/tanque
+        if (k === 'escape') closeAllMenus();  // Esc cierra y vuelve al gameplay
         if (k === 'v') { viewMode = (viewMode === 'fps') ? 'tps' : 'fps'; refreshPlayerGunView(); showToast(viewMode === 'fps' ? 'Vista: 1ª persona' : 'Vista: 3ª persona'); }
         if (['w', 'a', 's', 'd'].includes(k)) e.preventDefault();
     });
@@ -229,11 +250,12 @@ function initPlayerInput() {
         if (k === 'd') playerInput.right = false;
         if (k === 'shift' && p) p.sprinting = false;
     });
-    // CoD: Click IZQ dispara, Click DER apunta (ADS mantenido)
+    // CoD: Click IZQ dispara, Click DER apunta (ADS mantenido). Con menú abierto el mouse es libre.
     window.addEventListener('mousedown', (e) => {
         const p = getPlayer();
         if (!p || !gameStarted) return;
-        if (e.target.closest && e.target.closest('#build-menu,#weapon-menu,#platform-menu,#player-actions')) return;
+        if (e.target.closest && e.target.closest('#build-menu,#weapon-menu,#inventory-menu,#outpost-menu,#platform-menu,#player-actions')) return;
+        if (isAnyMenuOpen()) return; // mouse libre para clicar menús
         if (e.button === 0 && e.target.tagName === 'CANVAS') {
             requestCombatPointerLock();
             playerShoot();
@@ -264,6 +286,8 @@ function initPlayerInput() {
     initTouchControls();
     renderBuildMenu();
     renderWeaponMenu();
+    renderInventoryMenu();
+    renderOutpostMenu();
 }
 
 // En combate, click en el canvas captura el ratón para girar como en CoD
@@ -368,7 +392,16 @@ function playerAimPoint(maxRange) {
 
 function playerShoot() {
     const p = getPlayer();
-    if (!p || p.health <= 0 || p.shootCooldown > 0 || p.ammo <= 0) return;
+    if (!p || p.health <= 0 || isAnyMenuOpen()) return;
+    // Operando torre ametralladora: dispara la MG (alta cadencia + DMG, sin gastar tu munición)
+    if (p.onTower && p.onTower.mg && typeof mgTowerShoot === 'function') {
+        if (mgTowerShoot(p.onTower, p)) {
+            p.mesh.rotation.y = Math.atan2(playerForwardDir().x, playerForwardDir().z);
+            p.thoughtText = 'Operando ametralladora...';
+        }
+        return;
+    }
+    if (p.shootCooldown > 0 || p.ammo <= 0) return;
     const w = (typeof WEAPONS !== 'undefined' && WEAPONS[p.primary]) ? WEAPONS[p.primary] : null;
     const range = w ? w.range : 24;
     const aim = playerAimPoint(range);
@@ -482,8 +515,9 @@ function playerHealAlly() {
 function toggleWeaponMenu() {
     const m = document.getElementById('weapon-menu');
     if (!m) return;
-    m.classList.toggle('hidden');
-    if (!m.classList.contains('hidden')) renderWeaponMenu();
+    const willOpen = m.classList.contains('hidden');
+    closeAllMenus(true);
+    if (willOpen) { m.classList.remove('hidden'); renderWeaponMenu(); releasePointerForMenu(); }
 }
 function isWeaponMenuOpen() {
     const m = document.getElementById('weapon-menu');
@@ -529,8 +563,129 @@ function isBuildMenuOpen() {
 function toggleBuildMenu() {
     const m = document.getElementById('build-menu');
     if (!m) return;
-    m.classList.toggle('hidden');
-    if (!m.classList.contains('hidden')) renderBuildMenu();
+    const willOpen = m.classList.contains('hidden');
+    closeAllMenus(true);
+    if (willOpen) { m.classList.remove('hidden'); renderBuildMenu(); releasePointerForMenu(); }
+}
+// I: inventario del jugador + stock del depósito
+function isInventoryMenuOpen() {
+    const m = document.getElementById('inventory-menu');
+    return !!(m && !m.classList.contains('hidden'));
+}
+function toggleInventoryMenu() {
+    const m = document.getElementById('inventory-menu');
+    if (!m) return;
+    const willOpen = m.classList.contains('hidden');
+    closeAllMenus(true);
+    if (willOpen) { m.classList.remove('hidden'); renderInventoryMenu(); releasePointerForMenu(); }
+}
+// O: diseñador de refugio nuevo + patio del tanque
+function isOutpostMenuOpen() {
+    const m = document.getElementById('outpost-menu');
+    return !!(m && !m.classList.contains('hidden'));
+}
+function toggleOutpostMenu() {
+    const m = document.getElementById('outpost-menu');
+    if (!m) return;
+    const willOpen = m.classList.contains('hidden');
+    closeAllMenus(true);
+    if (willOpen) { m.classList.remove('hidden'); renderOutpostMenu(); releasePointerForMenu(); }
+}
+function closeAllMenus(silent) {
+    ['build-menu', 'weapon-menu', 'inventory-menu', 'outpost-menu'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.classList.add('hidden');
+    });
+    if (!silent && isParticipantActive() && uiMode !== 'mobile') {
+        showToast('Gameplay: click en el mundo para recapturar el mouse.');
+    }
+}
+function renderInventoryMenu() {
+    const wrap = document.getElementById('inventory-list');
+    if (!wrap) return;
+    const p = getPlayer();
+    wrap.innerHTML = '';
+    if (!p) { wrap.innerHTML = '<p class="text-slate-400 text-xs">Sin jugador (modo espectador).</p>'; return; }
+    const w = (typeof WEAPONS !== 'undefined' && WEAPONS[p.primary]) ? WEAPONS[p.primary] : null;
+    const rows = [
+        ['❤️ Salud', `${Math.round(p.health)} / ${p.maxHealth}`],
+        ['⚡ Energía', `${Math.round(p.stamina)}%`],
+        ['🔫 Arma', `${w ? w.label : p.weapon} · ${p.ammo} munición`],
+        ['💣 Granadas (Q)', `${p.grenades || 0}`],
+        ['💊 Botiquines (F)', `${p.medkits || 0}`],
+        ['🛡️ Armadura', `${Math.round(p.armor || 0)}`],
+        ['🔥 Bengalas', `${p.flares || 0}`],
+        ['📦 Caja en espalda', p.carriedCrate ? p.carriedCrate.config.name : 'Ninguna'],
+        ['🏚️ Depósito común', `Munic:${baseResources.ammo} Curas:${baseResources.meds} Comida:${baseResources.food} Armas:${baseResources.heavy} Esc:${Math.round(baseResources.debris || 0)}`]
+    ];
+    rows.forEach(([k, v]) => {
+        const r = document.createElement('div');
+        r.className = 'inv-row';
+        r.innerHTML = `<span>${k}</span><b>${v}</b>`;
+        wrap.appendChild(r);
+    });
+    const bar = document.createElement('div');
+    bar.className = 'inv-actions';
+    const b1 = document.createElement('button');
+    b1.innerText = '💊 Usarme botiquín';
+    b1.onclick = () => { useMedkitSelf(); renderInventoryMenu(); };
+    const b2 = document.createElement('button');
+    b2.innerText = '📦 Soltar caja';
+    b2.onclick = () => { dropPlayerCrate(); renderInventoryMenu(); };
+    bar.appendChild(b1); bar.appendChild(b2);
+    wrap.appendChild(bar);
+}
+function useMedkitSelf() {
+    const p = getPlayer();
+    if (!p || (p.medkits || 0) <= 0) { showToast('Sin botiquines.'); return; }
+    if (p.health >= p.maxHealth) { showToast('Salud al máximo.'); return; }
+    p.health = Math.min(p.maxHealth, p.health + 50);
+    p.medkits--;
+    if (typeof spawnHealCross === 'function') spawnHealCross(p.position);
+    addLogEvent('Jugador usa un botiquín en sí mismo.');
+    updateUI();
+}
+function dropPlayerCrate() {
+    const p = getPlayer();
+    if (!p || !p.carriedCrate) { showToast('No llevas caja.'); return; }
+    if (typeof spawnCrate === 'function') spawnCrate(p.carriedCrate.typeKey || 'MATERIAL', p.position.x + 1.5, p.position.z + 1.5);
+    p.carriedCrate = null;
+    if (typeof syncBackpack === 'function') syncBackpack(p);
+    showToast('Caja soltada a tus pies.');
+    updateUI();
+}
+function renderOutpostMenu() {
+    const wrap = document.getElementById('outpost-list');
+    if (!wrap) return;
+    const p = getPlayer();
+    wrap.innerHTML = '';
+    const info = document.createElement('p');
+    info.className = 'text-[11px] text-slate-400 mb-2';
+    info.innerText = p
+        ? `Refugios fundados: ${outposts.length}. Párate dentro del anillo y coloca. Todo queda FIJO.`
+        : 'Solo en participante.';
+    wrap.appendChild(info);
+    const mkBtn = (label, fn) => {
+        const b = document.createElement('button');
+        b.className = 'outpost-btn'; b.innerText = label; b.onclick = fn;
+        wrap.appendChild(b);
+    };
+    mkBtn('🏚️ Fundar refugio aquí (pide radio S/M/L)', () => {
+        const r = prompt('Radio del perímetro: S=14, M=20, L=26', 'M') || 'M';
+        const key = (r.toUpperCase()[0] === 'S') ? 'S' : (r.toUpperCase()[0] === 'L' ? 'L' : 'M');
+        if (typeof foundOutpostAt === 'function' && p) foundOutpostAt(p.position, key);
+        renderOutpostMenu();
+    });
+    mkBtn('📦 Colocar almacén aquí (20 esc)', () => placeOutpostModule('depot'));
+    mkBtn('🗼 Colocar obra de torre aquí (15 esc)', () => placeOutpostModule('tower'));
+    mkBtn('🧱 Colocar pared aquí (8 esc)', () => placeOutpostModule('wall'));
+    mkBtn('🦔 Colocar trampa aquí (5 esc)', () => placeOutpostModule('trap'));
+    mkBtn('🔫 Colocar torreta rápida aquí (40 esc)', () => placeOutpostModule('turret_rapid'));
+    mkBtn('🔥 Colocar torreta MG aquí (60 esc)', () => placeOutpostModule('turret_mg'));
+    mkBtn('🚀 Colocar torreta misiles aquí (55 esc)', () => placeOutpostModule('turret_missiles'));
+    mkBtn('🟠 Definir patio del tanque aquí (anillo 12m)', () => { if (typeof ensureTankYard === 'function' && p) { tank.yard = null; placeTankModule('wheels'); } renderOutpostMenu(); });
+    mkBtn('⚙️ Colocar torreta del tanque en patio', () => placeTankModule('turret'));
+    mkBtn('🛞 Registrar ruedas del tanque en patio', () => placeTankModule('wheels'));
 }
 function renderBuildMenu() {
     const wrap = document.getElementById('build-list');
@@ -567,23 +722,53 @@ function playerStartBuild(key) {
         if (typeof countCompleteTowers === 'function' && countCompleteTowers() >= TOWER_MAX) { showToast('Máximo de torres alcanzado.'); return; }
         baseResources.debris -= recipe.cost;
         const site = createTowerSite(mainZone.key, p.position.x + Math.cos(ang) * 8, p.position.z + Math.sin(ang) * 8);
+        site.fixed = true;
         p.playerBuildSite = { kind: 'tower', ref: site };
-        addLogEvent('Jugador funda obra de torre. ¡Martilla cerca + llama NPCs!');
+        addLogEvent('Jugador funda obra de torre. ¡Martilla cerca + llama NPCs! (FIJA)');
+    } else if (key === 'mg-tower') {
+        if (typeof countCompleteTowers === 'function' && countCompleteTowers() >= TOWER_MAX) { showToast('Máximo de torres alcanzado.'); return; }
+        baseResources.debris -= recipe.cost;
+        const site = (typeof createMGTowerSite === 'function')
+            ? createMGTowerSite(mainZone.key, p.position.x + Math.cos(ang) * 8, p.position.z + Math.sin(ang) * 8)
+            : createTowerSite(mainZone.key, p.position.x + Math.cos(ang) * 8, p.position.z + Math.sin(ang) * 8);
+        p.playerBuildSite = { kind: 'mg-tower', ref: site };
+        addLogEvent('Jugador funda TORRE AMETRALLADORA (FIJA). ¡Alta cadencia al terminar!');
+    } else if (key === 'turret_rapid' || key === 'turret_mg' || key === 'turret_missiles') {
+        baseResources.debris -= recipe.cost;
+        if (typeof placeTurretPost === 'function') placeTurretPost(key.replace('turret_', '').toUpperCase(), p.position.x + 2, p.position.z + 2);
+        addLogEvent('Torreta colocada (FIJA, auto-fuego).');
+    } else if (key === 'wall') {
+        baseResources.debris -= recipe.cost;
+        if (typeof createSurvivorBarricade === 'function') {
+            const b = createSurvivorBarricade(p.position.x + 2, p.position.z + 2, false);
+            b.health = 300; b.maxHealth = 300;
+        }
+        addLogEvent('Pared reforzada colocada (FIJA, 300 HP).');
+    } else if (key === 'trap') {
+        baseResources.debris -= recipe.cost;
+        if (typeof placeTrapAt === 'function') placeTrapAt(p.position.x + 2, p.position.z + 2);
+        addLogEvent('Trampa de pinchos colocada (FIJA).');
     } else if (key === 'perimeter') {
         baseResources.debris -= recipe.cost;
         if (typeof createSurvivorBarricade === 'function') createSurvivorBarricade(p.position.x + 3, p.position.z + 3, false);
-        addLogEvent('Jugador levanta un tramo del perímetro.');
+        addLogEvent('Jugador levanta un tramo del perímetro (FIJO).');
     } else if (key === 'shelter') {
-        const freeKey = Object.keys(ZONES).find(k => !ZONES[k].isActiveShelter);
-        if (!freeKey) { showToast('No quedan zonas libres para refugio.'); baseResources.debris += recipe.cost; return; }
+        // Refugio nuevo: pide perímetro S/M/L y abre el diseñador (todo FIJO)
         baseResources.debris -= recipe.cost;
-        shelterFounder = { zoneKey: freeKey, progress: 0, required: SHELTER_FOUND_WORK };
-        p.playerBuildSite = { kind: 'shelter', ref: shelterFounder };
-        addLogEvent(`Jugador funda refugio en ${ZONES[freeKey].name}. ¡Ayuda a construir!`);
+        const freeKey = Object.keys(ZONES).find(k => !ZONES[k].isActiveShelter);
+        if (freeKey) {
+            shelterFounder = { zoneKey: freeKey, progress: 0, required: SHELTER_FOUND_WORK };
+            p.playerBuildSite = { kind: 'shelter', ref: shelterFounder };
+        }
+        if (typeof foundOutpostAt === 'function') foundOutpostAt(p.position, 'M');
+        if (typeof toggleOutpostMenu === 'function') { closeAllMenus(true); toggleOutpostMenu(); }
+        addLogEvent(`Jugador funda REFUGIO NUEVO con perímetro (FIJO). Define: almacén, torres, paredes, trampas y torretas con O.`);
     } else if (key === 'tank') {
         baseResources.debris -= recipe.cost;
+        if (typeof ensureTankYard === 'function') ensureTankYard();
         p.playerBuildSite = { kind: 'tank', progress: 0, required: TANK_PART_WORK };
-        addLogEvent('Jugador inicia pieza de tanque. ¡Obra mayor!');
+        if (typeof toggleOutpostMenu === 'function') { closeAllMenus(true); toggleOutpostMenu(); }
+        addLogEvent('Jugador inicia pieza de tanque + PATIO 12m (FIJO): coloca torretas y ruedas con O.');
     } else if (key === 'dummy') {
         baseResources.debris -= recipe.cost;
         p.grenades--;
@@ -598,14 +783,16 @@ function playerStartBuild(key) {
 function updatePlayerBuildTick(p, delta) {
     const site = p.playerBuildSite;
     if (!site) return;
-    if (site.kind === 'tower' && site.ref) {
+    if ((site.kind === 'tower' || site.kind === 'mg-tower') && site.ref) {
         const d = p.position.distanceTo(site.ref.pos);
         if (d > 3) { p.thoughtText = 'Ve a la obra para martillar (B) + llama NPCs (botón)'; return; }
         p.hammering = true;
+        const need = (site.kind === 'mg-tower' && typeof MG_TOWER_WORK !== 'undefined') ? MG_TOWER_WORK : TOWER_WORK_REQUIRED;
         site.ref.progress += delta * 2 * Math.max(1, gameSpeed);
-        p.thoughtText = `Martillando torre ${Math.floor(site.ref.progress)}/${TOWER_WORK_REQUIRED}s`;
-        if (site.ref.progress >= TOWER_WORK_REQUIRED) {
-            if (typeof finishTower === 'function') finishTower(site.ref);
+        p.thoughtText = `Martillando ${site.kind === 'mg-tower' ? 'MG' : 'torre'} ${Math.floor(site.ref.progress)}/${need}s`;
+        if (site.ref.progress >= need) {
+            if (site.kind === 'mg-tower' && typeof finishMGTower === 'function') finishMGTower(site.ref);
+            else if (typeof finishTower === 'function') finishTower(site.ref);
             p.playerBuildSite = null;
             p.hammering = false;
         }
@@ -717,8 +904,9 @@ function updatePlayerHelpNPCTick(p, delta) {
     if (t.kind === 'tower') {
         t.ref.progress += amt;
         p.thoughtText = `Aportando a torre ${t.ref.id} ${Math.floor(t.ref.progress)}/${TOWER_WORK_REQUIRED}s`;
-        if (t.ref.progress >= TOWER_WORK_REQUIRED && typeof finishTower === 'function') {
-            finishTower(t.ref);
+        if (t.ref.progress >= TOWER_WORK_REQUIRED) {
+            if (t.ref.mg && typeof finishMGTower === 'function') finishMGTower(t.ref);
+            else if (typeof finishTower === 'function') finishTower(t.ref);
             showToast('¡Torre de los NPCs terminada con tu ayuda!');
         }
     } else if (t.kind === 'shelter') {
@@ -835,6 +1023,8 @@ function initTouchControls() {
             if (a === 'rally') playerRally();
             if (a === 'tower') toggleTowerMount();
             if (a === 'help') toggleHelpNPC();
+            if (a === 'inv') toggleInventoryMenu();
+            if (a === 'outpost') toggleOutpostMenu();
             e.preventDefault();
         }, { passive: false });
     });
