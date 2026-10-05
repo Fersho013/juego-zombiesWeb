@@ -1246,10 +1246,11 @@
         // CARRO DE CARGA (receta 4x100=400): max 2, 4 tripulantes, 6 cajas.
         // Orden grupal: carro1 > torre1 > carro2 > torre2 > tanque.
         // ==========================================================
-        function cartsDone() { return carts.length + (cartBuild ? 1 : 0); }
+        function cartsDone() { if (typeof CART_DISABLED !== 'undefined' && CART_DISABLED) return 2; return carts.length + (cartBuild ? 1 : 0); }
         function towersDone() { return countCompleteTowers() + (findTowerSite() ? 1 : 0); }
 
         function updateCartWork(s, delta, homeZone) {
+            if (typeof CART_DISABLED !== 'undefined' && CART_DISABLED) return false; // deshabilitado temporalmente
             if (isWaveActive || carts.length >= CART_MAX) return false;
             const mainZone = (ZONES[mainShelterKey] && ZONES[mainShelterKey].isActiveShelter) ? ZONES[mainShelterKey] : homeZone;
             if (!cartBuild) {
