@@ -207,12 +207,12 @@ body {
             z-index: 25; font-size: 10px; color: #cbd5e1; padding: 6px 12px;
             border-radius: 12px; white-space: nowrap; max-width: 96vw; overflow-x: auto;
         }
-        #build-menu, #weapon-menu {
+        #build-menu, #weapon-menu, #inventory-menu, #outpost-menu {
             position: fixed; left: 50%; top: 50%; transform: translate(-50%,-50%);
-            z-index: 60; width: 340px; max-width: 92vw; max-height: 80vh; overflow-y: auto;
-            border-radius: 18px; padding: 14px;
+            z-index: 60; width: 360px; max-width: 92vw; max-height: 82vh; overflow-y: auto;
+            border-radius: 18px; padding: 14px; cursor: default;
         }
-        #build-menu h3, #weapon-menu h3 { font-size: 13px; font-weight: 800; color: #fde68a; margin-bottom: 8px; }
+        #build-menu h3, #weapon-menu h3, #inventory-menu h3, #outpost-menu h3 { font-size: 13px; font-weight: 800; color: #fde68a; margin-bottom: 8px; }
         .build-item, .weapon-item {
             display: flex; justify-content: space-between; align-items: center; gap: 6px;
             background: rgba(15,23,42,0.9); border: 1px solid #334155;
@@ -223,6 +223,17 @@ body {
             border-radius: 8px; padding: 6px 10px; cursor: pointer; white-space: nowrap;
         }
         .build-item button:disabled { background: #475569; cursor: not-allowed; }
+        .inv-row {
+            display: flex; justify-content: space-between; gap: 8px; font-size: 11px; color: #e2e8f0;
+            background: rgba(15,23,42,0.9); border: 1px solid #334155; border-radius: 10px; padding: 7px 9px; margin-bottom: 5px;
+        }
+        .inv-actions { display: flex; gap: 6px; margin-top: 6px; }
+        .inv-actions button, .outpost-btn {
+            flex: 1; background: #1d4ed8; color: #fff; font-weight: 800; font-size: 11px;
+            border-radius: 10px; padding: 8px; cursor: pointer; margin-bottom: 6px; width: 100%;
+        }
+        .outpost-btn { background: rgba(15,23,42,0.9); border: 1px solid #334155; text-align: left; }
+        .outpost-btn:hover { border-color: #22d3ee; }
         .build-call {
             width: 100%; margin-top: 6px; background: #059669; color: #fff;
             font-weight: 800; font-size: 12px; border-radius: 12px; padding: 9px; cursor: pointer;
