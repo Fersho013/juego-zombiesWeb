@@ -349,23 +349,127 @@
         </div>
     </aside>
 
-    <!-- Platform Menu (previo): PC o Movil -->
-    <div id="platform-menu" class="flex fixed inset-0 z-[100] items-center justify-center bg-black/80 backdrop-blur-sm">
-        <div class="glass-panel rounded-3xl px-8 py-7 text-center shadow-2xl max-w-sm mx-4">
-            <div class="w-14 h-14 mx-auto mb-3 rounded-2xl bg-gradient-to-tr from-red-600 via-amber-600 to-yellow-500 flex items-center justify-center text-slate-950 text-2xl shadow-lg">
+    <!-- Menu principal: plataforma + modo + vista + custom -->
+    <div id="platform-menu" class="flex fixed inset-0 z-[100] items-center justify-center bg-black/80 backdrop-blur-sm p-3 overflow-y-auto">
+        <div class="glass-panel rounded-3xl px-6 py-6 text-center shadow-2xl max-w-lg w-full mx-2">
+            <div class="w-14 h-14 mx-auto mb-2 rounded-2xl bg-gradient-to-tr from-red-600 via-amber-600 to-yellow-500 flex items-center justify-center text-slate-950 text-2xl shadow-lg">
                 <i class="fa-solid fa-biohazard"></i>
             </div>
             <h2 class="text-lg font-black tracking-wide text-slate-100 mb-1">SURVIVORS VS ZOMBIES 3D</h2>
-            <p class="text-xs text-slate-400 mb-5">¿Desde donde vas a jugar?</p>
-            <div class="flex gap-2 justify-center">
-                <button onclick="setPlatform('pc')" class="flex-1 px-5 py-3 rounded-2xl bg-gradient-to-r from-red-600 to-amber-600 hover:from-red-500 hover:to-amber-500 text-white font-bold text-sm transition flex items-center justify-center gap-2">
+            <p class="text-xs text-slate-400 mb-4">Menú principal — el juego no empieza hasta pulsar Jugar</p>
+
+            <!-- 1) Plataforma -->
+            <p class="menu-label">1 · Plataforma</p>
+            <div class="flex gap-2 justify-center mb-3" id="platform-picker">
+                <button onclick="menuSelectPlatform('pc')" id="menu-btn-pc" class="menu-pick flex-1">
                     <i class="fa-solid fa-desktop"></i> PC
                 </button>
-                <button onclick="setPlatform('mobile')" class="flex-1 px-5 py-3 rounded-2xl bg-slate-800 hover:bg-emerald-700 border border-emerald-500/40 text-emerald-200 font-bold text-sm transition flex items-center justify-center gap-2">
+                <button onclick="menuSelectPlatform('mobile')" id="menu-btn-mobile" class="menu-pick flex-1">
                     <i class="fa-solid fa-mobile-screen"></i> Móvil
                 </button>
             </div>
-            <p class="text-[10px] text-slate-500 mt-3">En móvil se adapta a pantalla horizontal con paneles plegables.</p>
+            <p class="text-[10px] text-slate-500 mb-3">En móvil se fuerza horizontal + pantalla completa y paneles plegables.</p>
+
+            <!-- 2) Modo de juego -->
+            <p class="menu-label">2 · Modo de juego</p>
+            <div class="grid grid-cols-3 gap-2 mb-3" id="mode-picker">
+                <button onclick="menuSelectMode('spectator')" id="menu-btn-spectator" class="menu-pick">
+                    <i class="fa-solid fa-eye"></i> Espectador
+                    <span class="menu-sub">IA juega sola</span>
+                </button>
+                <button onclick="menuSelectMode('participant')" id="menu-btn-participant" class="menu-pick">
+                    <i class="fa-solid fa-gamepad"></i> Participante
+                    <span class="menu-sub">Tú juegas + IA</span>
+                </button>
+                <button onclick="menuSelectMode('custom')" id="menu-btn-custom" class="menu-pick">
+                    <i class="fa-solid fa-sliders"></i> Custom
+                    <span class="menu-sub">Ajustes propios</span>
+                </button>
+            </div>
+
+            <!-- 3) Vista participante -->
+            <div id="view-picker-wrap">
+                <p class="menu-label">3 · Vista (participante)</p>
+                <div class="flex gap-2 justify-center mb-3">
+                    <button onclick="menuSelectView('fps')" id="menu-btn-fps" class="menu-pick flex-1">
+                        <i class="fa-solid fa-crosshairs"></i> 1ª persona <span class="menu-sub">estilo CoD</span>
+                    </button>
+                    <button onclick="menuSelectView('tps')" id="menu-btn-tps" class="menu-pick flex-1">
+                        <i class="fa-solid fa-person-running"></i> 3ª persona <span class="menu-sub">estilo Fortnite</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- 4) Ajustes custom -->
+            <div id="custom-picker-wrap" class="hidden text-left bg-slate-900/70 border border-slate-700/60 rounded-2xl p-3 mb-3">
+                <p class="menu-label text-center">4 · Ajustes custom</p>
+                <div class="grid grid-cols-2 gap-2 text-[11px]">
+                    <label class="custom-row">Jugar como:
+                        <select id="custom-base" onchange="menuCustomChanged()" class="custom-input">
+                            <option value="spectator">Espectador</option>
+                            <option value="participant">Participante</option>
+                        </select>
+                    </label>
+                    <label class="custom-row">Zombies:
+                        <select id="custom-zombies" onchange="menuCustomChanged()" class="custom-input">
+                            <option value="0.5">0.5x pocos</option>
+                            <option value="1" selected>1x normal</option>
+                            <option value="2">2x horda</option>
+                        </select>
+                    </label>
+                    <label class="custom-row">Recursos inicio:
+                        <select id="custom-res" onchange="menuCustomChanged()" class="custom-input">
+                            <option value="0">0 nada</option>
+                            <option value="2" selected>2 normal</option>
+                            <option value="6">6 abundante</option>
+                        </select>
+                    </label>
+                    <label class="custom-row">Preparación:
+                        <select id="custom-prep" onchange="menuCustomChanged()" class="custom-input">
+                            <option value="60">1:00 corta</option>
+                            <option value="180" selected>3:00 normal</option>
+                            <option value="300">5:00 larga</option>
+                        </select>
+                    </label>
+                </div>
+            </div>
+
+            <button onclick="menuStartGame()" class="w-full px-5 py-3 rounded-2xl bg-gradient-to-r from-red-600 to-amber-600 hover:from-red-500 hover:to-amber-500 text-white font-black text-sm transition flex items-center justify-center gap-2">
+                <i class="fa-solid fa-play"></i> JUGAR
+            </button>
+            <p id="menu-hint" class="text-[10px] text-amber-300 mt-2">Elige plataforma y modo, luego pulsa JUGAR.</p>
+            <p class="text-[10px] text-slate-500 mt-1">PC: WASD moverse · B construir · E recoger/entregar · Click der. disparar · Click izq. granada · G armas · T reagrupar · Q curar</p>
+        </div>
+    </div>
+
+    <!-- Mira central participante -->
+    <div id="player-crosshair" class="hidden">+</div>
+    <!-- Ayuda participante -->
+    <div id="player-help" class="hidden glass-panel">WASD mover · <b>B</b> construir · <b>E</b> recoger/entregar · <b>ClickD</b> disparar · <b>ClickI</b> granada · <b>G</b> armas · <b>T</b> reagrupar · <b>Q</b> curar · <b>V</b> cambiar vista</div>
+
+    <!-- Menu de construccion manual (B) -->
+    <div id="build-menu" class="hidden glass-panel">
+        <h3><i class="fa-solid fa-hammer mr-1"></i> Construcción manual <span class="text-slate-500 font-normal">[B cierra]</span></h3>
+        <div id="build-list"></div>
+        <button onclick="playerCallHelpers()" class="build-call"><i class="fa-solid fa-bullhorn"></i> Llamar NPCs a mi obra (más rápido)</button>
+    </div>
+
+    <!-- Selector de armas (G) -->
+    <div id="weapon-menu" class="hidden glass-panel">
+        <h3><i class="fa-solid fa-gun mr-1"></i> Armas <span class="text-slate-500 font-normal">[G cierra]</span></h3>
+        <div id="weapon-list"></div>
+    </div>
+
+    <!-- Controles tactiles movil (participante) -->
+    <div id="touch-controls" class="hidden">
+        <div id="touch-joystick"><div id="touch-stick"></div></div>
+        <div id="touch-buttons">
+            <button data-act="fire">🔥</button>
+            <button data-act="grenade">💣</button>
+            <button data-act="interact">E</button>
+            <button data-act="build">B</button>
+            <button data-act="heal">Q</button>
+            <button data-act="rally">T</button>
         </div>
     </div>
 
@@ -411,6 +515,7 @@
     <script src="js/air-support.js"></script>
     <script src="js/combat.js"></script>
     <script src="js/ui.js"></script>
+    <script src="js/player.js"></script>
     <script src="js/main.js"></script>
 </body>
 </html>
