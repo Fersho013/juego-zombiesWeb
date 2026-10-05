@@ -445,29 +445,43 @@
     <!-- Mira central participante -->
     <div id="player-crosshair" class="hidden">+</div>
     <!-- Ayuda participante -->
-    <div id="player-help" class="hidden glass-panel">WASD mover · Shift correr · <b>ClickI</b> disparar · <b>ClickD</b> apuntar · <b>Q</b> granada · <b>F</b> curar · <b>E</b> recoger · <b>B</b> construir · <b>X</b> ayudar NPC · <b>Z</b> torre · <b>G</b> armas</div>
+    <div id="player-help" class="hidden glass-panel">WASD mover · Shift correr · <b>ClickI</b> disparar · <b>ClickD</b> apuntar · <b>Q</b> granada · <b>F</b> curar · <b>E</b> recoger · <b>B</b> construir · <b>I</b> inventario · <b>O</b> base · <b>X</b> ayudar NPC · <b>Z</b> torre · <b>G</b> armas</div>
 
     <!-- Barra de acciones participante (PC + movil) -->
     <div id="player-actions" class="hidden">
         <button onclick="toggleBuildMenu()" title="Construir (B)"><i class="fa-solid fa-hammer"></i> B</button>
+        <button onclick="toggleInventoryMenu()" title="Inventario (I)"><i class="fa-solid fa-backpack"></i> I</button>
+        <button onclick="toggleOutpostMenu()" title="Diseñador base (O)"><i class="fa-solid fa-compass-drafting"></i> O</button>
         <button onclick="toggleHelpNPC()" title="Aportar a obra NPC (X)"><i class="fa-solid fa-handshake-angle"></i> X</button>
         <button onclick="toggleTowerMount()" title="Subir/bajar torre (Z)"><i class="fa-solid fa-tower-observation"></i> Z</button>
         <button onclick="playerHealAlly()" title="Curar aliado (F)"><i class="fa-solid fa-kit-medical"></i> F</button>
     </div>
 
-    <!-- Menu de construccion manual (B) -->
+    <!-- Menu de construccion manual (B): con mouse libre, al cerrar vuelve al gameplay -->
     <div id="build-menu" class="hidden glass-panel">
-        <h3><i class="fa-solid fa-hammer mr-1"></i> Construcción manual <span class="text-slate-500 font-normal">[B cierra]</span></h3>
+        <h3><i class="fa-solid fa-hammer mr-1"></i> Construcción manual <span class="text-slate-500 font-normal">[B o Esc cierra y vuelve al juego]</span></h3>
         <div id="build-list"></div>
         <button onclick="playerCallHelpers()" class="build-call"><i class="fa-solid fa-bullhorn"></i> Llamar NPCs a mi obra (más rápido)</button>
         <button onclick="toggleHelpNPC()" class="build-help"><i class="fa-solid fa-handshake-angle"></i> Aportar a obra de NPCs [X]: martillas su torre/refugio/tanque</button>
         <p class="text-[10px] text-slate-500 mt-1">Carro deshabilitado temporalmente.</p>
     </div>
 
-    <!-- Selector de armas (G) -->
+    <!-- Selector de armas (G): con mouse libre, al cerrar vuelve al gameplay -->
     <div id="weapon-menu" class="hidden glass-panel">
-        <h3><i class="fa-solid fa-gun mr-1"></i> Armas <span class="text-slate-500 font-normal">[G cierra]</span></h3>
+        <h3><i class="fa-solid fa-gun mr-1"></i> Armas <span class="text-slate-500 font-normal">[G o Esc cierra y vuelve al juego]</span></h3>
         <div id="weapon-list"></div>
+    </div>
+
+    <!-- Inventario (I): con mouse libre, al cerrar vuelve al gameplay -->
+    <div id="inventory-menu" class="hidden glass-panel">
+        <h3><i class="fa-solid fa-backpack mr-1"></i> Inventario <span class="text-slate-500 font-normal">[I o Esc cierra y vuelve al juego]</span></h3>
+        <div id="inventory-list"></div>
+    </div>
+
+    <!-- Diseñador de base (O): refugio nuevo + patio del tanque -->
+    <div id="outpost-menu" class="hidden glass-panel">
+        <h3><i class="fa-solid fa-compass-drafting mr-1"></i> Diseñador de base <span class="text-slate-500 font-normal">[O o Esc cierra]</span></h3>
+        <div id="outpost-list"></div>
     </div>
 
     <!-- Controles tactiles movil (participante) -->
@@ -482,6 +496,8 @@
             <button data-act="heal">F</button>
             <button data-act="tower">🗼</button>
             <button data-act="help">X</button>
+            <button data-act="inv">🎒</button>
+            <button data-act="outpost">🏚️</button>
             <button data-act="rally">T</button>
         </div>
     </div>
@@ -529,6 +545,7 @@
     <script src="js/combat.js"></script>
     <script src="js/ui.js"></script>
     <script src="js/player.js"></script>
+    <script src="js/outpost.js"></script>
     <script src="js/main.js"></script>
 </body>
 </html>
