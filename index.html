@@ -438,20 +438,30 @@
                 <i class="fa-solid fa-play"></i> JUGAR
             </button>
             <p id="menu-hint" class="text-[10px] text-amber-300 mt-2">Elige plataforma y modo, luego pulsa JUGAR.</p>
-            <p class="text-[10px] text-slate-500 mt-1">PC: WASD moverse · B construir · E recoger/entregar · Click der. disparar · Click izq. granada · G armas · T reagrupar · Q curar</p>
+            <p class="text-[10px] text-slate-500 mt-1">PC estilo CoD: WASD + Shift correr · ClickI disparar · ClickD apuntar · Q granada · F curar · E recoger · B construir · X ayudar obra · Z torre · G armas · T reagrupar</p>
         </div>
     </div>
 
     <!-- Mira central participante -->
     <div id="player-crosshair" class="hidden">+</div>
     <!-- Ayuda participante -->
-    <div id="player-help" class="hidden glass-panel">WASD mover · <b>B</b> construir · <b>E</b> recoger/entregar · <b>ClickD</b> disparar · <b>ClickI</b> granada · <b>G</b> armas · <b>T</b> reagrupar · <b>Q</b> curar · <b>V</b> cambiar vista</div>
+    <div id="player-help" class="hidden glass-panel">WASD mover · Shift correr · <b>ClickI</b> disparar · <b>ClickD</b> apuntar · <b>Q</b> granada · <b>F</b> curar · <b>E</b> recoger · <b>B</b> construir · <b>X</b> ayudar NPC · <b>Z</b> torre · <b>G</b> armas</div>
+
+    <!-- Barra de acciones participante (PC + movil) -->
+    <div id="player-actions" class="hidden">
+        <button onclick="toggleBuildMenu()" title="Construir (B)"><i class="fa-solid fa-hammer"></i> B</button>
+        <button onclick="toggleHelpNPC()" title="Aportar a obra NPC (X)"><i class="fa-solid fa-handshake-angle"></i> X</button>
+        <button onclick="toggleTowerMount()" title="Subir/bajar torre (Z)"><i class="fa-solid fa-tower-observation"></i> Z</button>
+        <button onclick="playerHealAlly()" title="Curar aliado (F)"><i class="fa-solid fa-kit-medical"></i> F</button>
+    </div>
 
     <!-- Menu de construccion manual (B) -->
     <div id="build-menu" class="hidden glass-panel">
         <h3><i class="fa-solid fa-hammer mr-1"></i> Construcción manual <span class="text-slate-500 font-normal">[B cierra]</span></h3>
         <div id="build-list"></div>
         <button onclick="playerCallHelpers()" class="build-call"><i class="fa-solid fa-bullhorn"></i> Llamar NPCs a mi obra (más rápido)</button>
+        <button onclick="toggleHelpNPC()" class="build-help"><i class="fa-solid fa-handshake-angle"></i> Aportar a obra de NPCs [X]: martillas su torre/refugio/tanque</button>
+        <p class="text-[10px] text-slate-500 mt-1">Carro deshabilitado temporalmente.</p>
     </div>
 
     <!-- Selector de armas (G) -->
@@ -465,10 +475,13 @@
         <div id="touch-joystick"><div id="touch-stick"></div></div>
         <div id="touch-buttons">
             <button data-act="fire">🔥</button>
+            <button data-act="aim">🎯</button>
             <button data-act="grenade">💣</button>
             <button data-act="interact">E</button>
             <button data-act="build">B</button>
-            <button data-act="heal">Q</button>
+            <button data-act="heal">F</button>
+            <button data-act="tower">🗼</button>
+            <button data-act="help">X</button>
             <button data-act="rally">T</button>
         </div>
     </div>
