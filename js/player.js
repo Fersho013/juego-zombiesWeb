@@ -1,10 +1,10 @@
 /**
- * player.js - Menu inicial + modo participante (jugador manual).
- * - Menu: plataforma PC/movil, modo espectador/participante/custom, vista FPS/TPS.
- * - Participante: 6º superviviente "Jugador" con WASD, B, E, ClickD/I, G, T, Q, V.
- * - Construccion manual con todos los recipes + llamada de NPCs.
- * - Movil: horizontal + pantalla completa + joystick tactil.
+ * player.js - Menu inicial + modo participante (jugador manual) estilo CoD.
+ * - Click IZQ dispara, Click DER apunta (ADS), Q granada, F curar, E recoger,
+ *   B construir, X ayudar obra NPC, Z subir/bajar torre, G armas, T reagrupar, V vista.
+ * - Carro deshabilitado (CART_DISABLED). Torre y tanque/perimetro/refugio/dummie activos.
  */
+let playerGunView = null; // viewmodel del arma en 1ª persona
 
 // ============================================================
 // MENU INICIAL
@@ -123,13 +123,16 @@ function menuStartGame() {
         if (help) help.classList.remove('hidden');
         const ch = document.getElementById('player-crosshair');
         if (ch) ch.classList.remove('hidden');
+        const pa = document.getElementById('player-actions');
+        if (pa) pa.classList.remove('hidden');
         if (uiMode === 'mobile') {
             const tc = document.getElementById('touch-controls');
             if (tc) tc.classList.remove('hidden');
         }
         initPlayerInput();
-        addLogEvent('Modo PARTICIPANTE: controlas a Jugador (WASD + ratón). Pulsa B para construir.');
-        showToast('Eres el Jugador: WASD moverse, B construir, E recoger.');
+        refreshPlayerGunView();
+        addLogEvent('Modo PARTICIPANTE estilo CoD: ClickI dispara, ClickD apunta, Q granada, F cura, Z torre, X ayuda obra.');
+        showToast('CoD: ClickI dispara · ClickD apunta · Q granada · F cura · Z torre');
     } else {
         addLogEvent('Modo ESPECTADOR: los 5 NPC juegan solos.');
     }
@@ -185,11 +188,11 @@ function isParticipantActive() {
 // INPUT PC (WASD + ratón + teclas)
 // ============================================================
 let playerInputBound = false;
+// Carro deshabilitado temporalmente: no se ofrece ni lo construye la IA (ver CART_DISABLED)
 const BUILD_RECIPES = [
     { key: 'tower',     label: 'Torre vigía',        cost: 15,  work: 400, desc: 'Plataforma francotirador (400s)' },
     { key: 'perimeter', label: 'Tramo perímetro',    cost: 10,  work: 40,  desc: 'Barricada del refugio (rápida)' },
     { key: 'shelter',   label: 'Fundar refugio',     cost: 30,  work: 120, desc: 'Nueva casa-refugio (120s)' },
-    { key: 'cart',      label: 'Pieza de carro',     cost: 100, work: 120, desc: 'Carro 4x100 (transporte)' },
     { key: 'tank',      label: 'Pieza de tanque',    cost: 500, work: 300, desc: 'Tanque 5x500 (arma final)' },
     { key: 'dummy',     label: 'Dummie bomba',       cost: 20,  work: 4,   desc: 'Señuelo explosivo (+1 granada)' }
 ];
@@ -205,43 +208,72 @@ function initPlayerInput() {
         if (k === 's') playerInput.back = true;
         if (k === 'a') playerInput.left = true;
         if (k === 'd') playerInput.right = true;
+        if (k === 'shift') p.sprinting = true;
         if (k === 'b') toggleBuildMenu();
         if (k === 'e') playerInteract();
         if (k === 'g') toggleWeaponMenu();
         if (k === 't') playerRally();
-        if (k === 'q') playerHealAlly();
-        if (k === 'v') { viewMode = (viewMode === 'fps') ? 'tps' : 'fps'; showToast(viewMode === 'fps' ? 'Vista: 1ª persona' : 'Vista: 3ª persona'); }
+        if (k === 'q') playerThrowGrenade(); // CoD: Q = granada
+        if (k === 'f') playerHealAlly();     // curar pasa a F
+        if (k === 'x') toggleHelpNPC();       // aportar a obra de NPCs
+        if (k === 'z') toggleTowerMount();   // subir/bajar torre
+        if (k === 'v') { viewMode = (viewMode === 'fps') ? 'tps' : 'fps'; refreshPlayerGunView(); showToast(viewMode === 'fps' ? 'Vista: 1ª persona' : 'Vista: 3ª persona'); }
         if (['w', 'a', 's', 'd'].includes(k)) e.preventDefault();
     });
     window.addEventListener('keyup', (e) => {
         const k = e.key.toLowerCase();
+        const p = getPlayer();
         if (k === 'w') playerInput.fwd = false;
         if (k === 's') playerInput.back = false;
         if (k === 'a') playerInput.left = false;
         if (k === 'd') playerInput.right = false;
+        if (k === 'shift' && p) p.sprinting = false;
     });
-    // Ratón: Click DERECHO dispara, Click IZQUIERDO granada (según spec)
+    // CoD: Click IZQ dispara, Click DER apunta (ADS mantenido)
     window.addEventListener('mousedown', (e) => {
         const p = getPlayer();
         if (!p || !gameStarted) return;
-        if (!isBuildMenuOpen() && !isWeaponMenuOpen() && e.target.closest('#build-menu,#weapon-menu,#platform-menu')) return;
-        if (e.button === 2) playerShoot();
-        if (e.button === 0 && e.target.tagName === 'CANVAS') playerThrowGrenade();
+        if (e.target.closest && e.target.closest('#build-menu,#weapon-menu,#platform-menu,#player-actions')) return;
+        if (e.button === 0 && e.target.tagName === 'CANVAS') {
+            requestCombatPointerLock();
+            playerShoot();
+        }
+        if (e.button === 2) playerInput.aiming = true;
+    });
+    window.addEventListener('mouseup', (e) => {
+        if (e.button === 2) playerInput.aiming = false;
     });
     window.addEventListener('contextmenu', (e) => {
         if (gameStarted && getPlayer()) e.preventDefault();
     });
-    // Mirar con el ratón (yaw/pitch) al mover sobre el canvas en participante
+    // Cámara con el mouse en combate (pointer lock); fallback arrastre si no hay lock
     window.addEventListener('mousemove', (e) => {
         if (!isParticipantActive()) return;
-        if (e.buttons !== 0 && e.target && e.target.tagName === 'CANVAS') {
+        if (document.pointerLockElement) {
+            playerInput.yaw -= e.movementX * 0.0022;
+            playerInput.pitch = Math.max(-1, Math.min(0.6, playerInput.pitch - e.movementY * 0.0018));
+        } else if (e.buttons !== 0 && e.target && e.target.tagName === 'CANVAS') {
             playerInput.yaw -= e.movementX * 0.003;
             playerInput.pitch = Math.max(-1, Math.min(0.6, playerInput.pitch - e.movementY * 0.002));
         }
     });
+    // Salir de ADS si se pierde el lock / se suelta todo
+    document.addEventListener('pointerlockchange', () => {
+        if (!document.pointerLockElement) playerInput.aiming = false;
+    });
     initTouchControls();
     renderBuildMenu();
     renderWeaponMenu();
+}
+
+// En combate, click en el canvas captura el ratón para girar como en CoD
+function requestCombatPointerLock() {
+    try {
+        const cv = renderer && renderer.domElement;
+        if (cv && cv.requestPointerLock && !document.pointerLockElement && uiMode !== 'mobile') {
+            cv.requestPointerLock();
+        }
+    } catch (e) {}
 }
 
 // ============================================================
@@ -258,12 +290,28 @@ function updatePlayer(delta) {
         // Muerto: salir de FPS, mostrar cuerpo y ceder cámara a orbit
         p.mesh.visible = true;
         if (controls) controls.enabled = true;
+        exitPlayerGunView();
+        if (document.pointerLockElement) { try { document.exitPointerLock(); } catch (e) {} }
         return;
     }
     p.shootCooldown = Math.max(0, p.shootCooldown - delta);
     p.grenadeCooldown = Math.max(0, (p.grenadeCooldown || 0) - delta * Math.max(1, gameSpeed));
-    // Movimiento WASD relativo a la cámara
-    const speed = 0.14 * (p.stamina > 10 ? 1 : 0.6);
+    // En torre: posición fija en plataforma, solo girar/disparar (Z para bajar)
+    if (p.onTower) {
+        p.isMoving = false;
+        p.hammering = false;
+        const slot = p.onTower.occupants.indexOf(p);
+        const ox = p.onTower.pos.x + (slot === 0 ? -1 : 1);
+        p.position.set(ox, TOWER_HEIGHT + 0.4, p.onTower.pos.z);
+        p.thoughtText = `En torre ${p.onTower.id}: apunta con ratón, ClickI dispara (Z baja)`;
+        if (typeof animateEntityLimbs === 'function') animateEntityLimbs(p, delta);
+        updatePlayerCamera();
+        return;
+    }
+    // Movimiento WASD relativo a la cámara (ADS = más lento, sprint con Shift)
+    let speed = 0.14 * (p.stamina > 10 ? 1 : 0.6);
+    if (playerInput.aiming) speed *= 0.5; // apuntando se camina lento como en CoD
+    else if (p.sprinting && playerInput.fwd) speed *= 1.6;
     const fwd = playerForwardDir();
     const right = new THREE.Vector3(-fwd.z, 0, fwd.x);
     const move = new THREE.Vector3();
@@ -286,8 +334,9 @@ function updatePlayer(delta) {
         p.isMoving = false;
         p.stamina = Math.min(100, p.stamina + delta * 8);
     }
-    // Martilleo de obra propia (B -> construir): aporta como un NPC
+    // Martilleo: obra propia (B) o aporte a obra de NPCs (X)
     if (p.playerBuildSite) updatePlayerBuildTick(p, delta);
+    else if (playerInput.helpingNPC) updatePlayerHelpNPCTick(p, delta);
     if (typeof syncHandTool === 'function') syncHandTool(p);
     if (typeof syncBackpack === 'function') syncBackpack(p);
     if (typeof animateEntityLimbs === 'function') animateEntityLimbs(p, delta);
@@ -298,7 +347,12 @@ function playerAimPoint(maxRange) {
     const p = getPlayer();
     const dir = playerForwardDir();
     const origin = p.position.clone().add(new THREE.Vector3(0, 1.4, 0));
-    let best = null, bestD = maxRange || 40;
+    // ADS = cono más estrecho y más alcance (bonus de torre incluido)
+    let range = maxRange || 40;
+    if (playerInput.aiming) range *= 1.25;
+    if (p.onTower) range *= 1.3;
+    const dotMin = playerInput.aiming ? 0.94 : 0.86;
+    let best = null, bestD = range;
     zombies.forEach(z => {
         if (z.health <= 0 || z.dying) return;
         const to = z.position.clone().sub(p.position); to.y = 0;
@@ -306,7 +360,7 @@ function playerAimPoint(maxRange) {
         if (d > bestD) return;
         to.normalize();
         const dot = to.dot(dir.clone().normalize());
-        if (dot > 0.86 && d < bestD) { bestD = d; best = z; }
+        if (dot > dotMin && d < bestD) { bestD = d; best = z; }
     });
     if (best) return { zombie: best, point: best.position.clone() };
     return { zombie: null, point: origin.add(dir.multiplyScalar(14)) };
@@ -453,6 +507,7 @@ function renderWeaponMenu() {
                 p.primary = k;
                 p.weapon = w.label;
                 if (typeof refreshWeaponMesh === 'function') refreshWeaponMesh(p);
+                refreshPlayerGunView();
                 if (typeof equipPrimary === 'function') { try { equipPrimary(p, k); } catch (e) {} }
                 addLogEvent(`Jugador equipa ${w.label}.`);
                 updateUI();
@@ -525,12 +580,6 @@ function playerStartBuild(key) {
         shelterFounder = { zoneKey: freeKey, progress: 0, required: SHELTER_FOUND_WORK };
         p.playerBuildSite = { kind: 'shelter', ref: shelterFounder };
         addLogEvent(`Jugador funda refugio en ${ZONES[freeKey].name}. ¡Ayuda a construir!`);
-    } else if (key === 'cart') {
-        if (carts.length >= CART_MAX) { showToast('Máximo de carros alcanzado.'); return; }
-        baseResources.debris -= recipe.cost;
-        // Obra simplificada: el jugador + NPCs aportan, al completar aparece el carro
-        p.playerBuildSite = { kind: 'cart', progress: 0, required: CART_PART_WORK };
-        addLogEvent('Jugador inicia pieza de carro. ¡Martilla + llama NPCs!');
     } else if (key === 'tank') {
         baseResources.debris -= recipe.cost;
         p.playerBuildSite = { kind: 'tank', progress: 0, required: TANK_PART_WORK };
@@ -573,18 +622,13 @@ function updatePlayerBuildTick(p, delta) {
         }
         return;
     }
-    // cart / tank simplificados junto al jugador
-    const d0 = 4;
+    // tank simplificado junto al jugador (carro deshabilitado)
     p.hammering = true;
     site.progress += delta * 2 * Math.max(1, gameSpeed);
     p.thoughtText = `Construyendo ${site.kind} ${Math.floor(site.progress)}/${site.required}s (NPCs ayudan x2)`;
     if (site.progress >= site.required) {
-        if (site.kind === 'cart' && typeof assembleCart === 'function') {
-            try { assembleCart(); } catch (e) { addLogEvent('Pieza de carro del jugador lista.'); }
-        } else {
-            addLogEvent(`Pieza de ${site.kind} del jugador terminada.`);
-            showToast(`¡Pieza de ${site.kind} lista!`);
-        }
+        addLogEvent(`Pieza de ${site.kind} del jugador terminada.`);
+        showToast(`¡Pieza de ${site.kind} lista!`);
         p.playerBuildSite = null;
         p.hammering = false;
     }
@@ -604,7 +648,6 @@ function playerCallHelpers() {
         o.targetCrate = null;
         if (site.kind === 'tower' && site.ref) { o.towerSiteId = site.ref.id; o.towerCommitted = true; }
         if (site.kind === 'shelter') { o.foundCommitted = true; }
-        if (site.kind === 'cart') { o.cartCommitted = true; }
         if (site.kind === 'tank') { o.tankCommitted = true; }
         o.targetPos = targetPos.clone().add(new THREE.Vector3((Math.random() - 0.5) * 4, 0, (Math.random() - 0.5) * 4));
         o.thoughtText = '¡Ayudando al Jugador en su obra!';
@@ -615,27 +658,132 @@ function playerCallHelpers() {
 }
 
 // ============================================================
-// CÁMARA FPS / TPS + TÁCTIL
+// TORRE: subir/bajar + APORTE A OBRAS DE NPCs (X)
 // ============================================================
+function nearestFreeTower(pos, range) {
+    if (typeof nearestTower !== 'function') return null;
+    const t = nearestTower(pos, range || 60, true);
+    if (!t || t.occupants.length >= 2) return null;
+    return t;
+}
+function toggleTowerMount() {
+    const p = getPlayer();
+    if (!p || p.health <= 0) return;
+    if (p.onTower) { playerDismountTower(); return; }
+    const t = nearestFreeTower(p.position, 12);
+    if (!t) { showToast('Sin torre libre cerca (12m). Construye una con B.'); return; }
+    t.occupants.push(p);
+    p.onTower = t;
+    p.hammering = false;
+    addLogEvent(`Jugador sube a la torre ${t.id}. ¡Dispara desde arriba!`);
+    showToast(`En torre ${t.id}: ClickI dispara, Z para bajar.`);
+}
+function playerDismountTower() {
+    const p = getPlayer();
+    if (!p || !p.onTower) return;
+    if (typeof dismountTower === 'function') dismountTower(p);
+    else { p.onTower = null; p.position.y = 0; }
+    p.position.y = 0;
+    showToast('Bajaste de la torre.');
+}
+// X: alterna aportar martillo a la obra ACTIVA de los NPCs (torre/refugio/tanque)
+function toggleHelpNPC() {
+    playerInput.helpingNPC = !playerInput.helpingNPC;
+    showToast(playerInput.helpingNPC ? 'Aportando a obra de NPCs (acércate y martillas solo)' : 'Aporte a NPCs desactivado');
+    addLogEvent(playerInput.helpingNPC ? 'Jugador ayuda en la obra de los NPCs.' : 'Jugador deja de ayudar a los NPCs.');
+}
+function findNPCBuildTarget(p) {
+    if (typeof findTowerSite === 'function') {
+        const s = findTowerSite();
+        if (s) return { kind: 'tower', ref: s, pos: s.pos };
+    }
+    if (typeof shelterFounder !== 'undefined' && shelterFounder && ZONES[shelterFounder.zoneKey]) {
+        return { kind: 'shelter', ref: shelterFounder, pos: ZONES[shelterFounder.zoneKey].pos };
+    }
+    if (typeof tank !== 'undefined' && tank.build && tank.yard) {
+        return { kind: 'tank', ref: tank.build, pos: tank.yard };
+    }
+    return null;
+}
+function updatePlayerHelpNPCTick(p, delta) {
+    const t = findNPCBuildTarget(p);
+    if (!t) { p.thoughtText = 'Sin obra NPC activa: abre B para fundar una'; return; }
+    const d = p.position.distanceTo(t.pos);
+    const reach = (t.kind === 'shelter') ? 12 : 3.5;
+    if (d > reach) { p.thoughtText = `Ve a la obra NPC (${t.kind}) para aportar [X]`; p.hammering = false; return; }
+    p.hammering = true;
+    if (typeof syncHandTool === 'function') syncHandTool(p);
+    const amt = delta * 2 * Math.max(1, gameSpeed);
+    if (t.kind === 'tower') {
+        t.ref.progress += amt;
+        p.thoughtText = `Aportando a torre ${t.ref.id} ${Math.floor(t.ref.progress)}/${TOWER_WORK_REQUIRED}s`;
+        if (t.ref.progress >= TOWER_WORK_REQUIRED && typeof finishTower === 'function') {
+            finishTower(t.ref);
+            showToast('¡Torre de los NPCs terminada con tu ayuda!');
+        }
+    } else if (t.kind === 'shelter') {
+        t.ref.progress += amt;
+        p.thoughtText = `Aportando a refugio ${Math.floor(t.ref.progress)}/${t.ref.required}s`;
+    } else if (t.kind === 'tank') {
+        t.ref.progress += amt;
+        p.thoughtText = `Aportando a tanque ${Math.floor(t.ref.progress)}/${TANK_PART_WORK}s`;
+        if (t.ref.progress >= TANK_PART_WORK && typeof finishTankPart === 'function') finishTankPart();
+    }
+}
+
+// ============================================================
+// CÁMARA FPS / TPS + ARMA VISIBLE (viewmodel CoD) + TÁCTIL
+// ============================================================
+// Viewmodel: arma física pegada a la cámara en 1ª persona
+function refreshPlayerGunView() {
+    exitPlayerGunView();
+    const p = getPlayer();
+    if (!p || viewMode !== 'fps' || typeof createWeaponMesh !== 'function') return;
+    playerGunView = createWeaponMesh(p.primary || 'RIFLE');
+    playerGunView.position.set(0.28, -0.24, -0.55);
+    playerGunView.rotation.y = Math.PI;
+    camera.add(playerGunView);
+}
+function exitPlayerGunView() {
+    if (playerGunView && playerGunView.parent) playerGunView.parent.remove(playerGunView);
+    playerGunView = null;
+}
 function updatePlayerCamera() {
     const p = getPlayer();
     if (!p) return;
     cameraMode = 'follow';
     selectedSurvivorIndex = playerIndex;
     const dir = playerForwardDir();
+    // ADS: zoom de cámara como en CoD
+    const wantFov = playerInput.aiming ? 40 : 62;
+    if (camera.fov !== wantFov) { camera.fov += (wantFov - camera.fov) * 0.2; camera.updateProjectionMatrix(); }
+    const ch = document.getElementById('player-crosshair');
+    if (ch) ch.classList.toggle('ads', !!playerInput.aiming);
     if (viewMode === 'fps') {
-        // Primera persona estilo CoD: ojos del jugador
+        // Primera persona estilo CoD: ojos + arma visible
+        if (camera.parent !== scene) scene.add(camera);
         const eye = p.position.clone().add(new THREE.Vector3(0, 1.7, 0));
         camera.position.copy(eye);
         const look = eye.clone().add(new THREE.Vector3(dir.x, playerInput.pitch, dir.z).multiplyScalar(10));
         camera.lookAt(look);
         p.mesh.visible = false;
         if (controls) controls.enabled = false;
+        if (!playerGunView) refreshPlayerGunView();
+        if (playerGunView) {
+            // Cadera vs apuntado: el arma se centra al apuntar
+            const tx = playerInput.aiming ? 0.0 : 0.28;
+            const ty = playerInput.aiming ? -0.185 : -0.24;
+            const tz = playerInput.aiming ? -0.35 : -0.55;
+            playerGunView.position.lerp(new THREE.Vector3(tx, ty, tz), 0.25);
+        }
     } else {
         // Tercera persona estilo Fortnite: hombro
+        exitPlayerGunView();
         p.mesh.visible = true;
+        if (camera.fov !== 55) { camera.fov = 55; camera.updateProjectionMatrix(); }
         if (controls) controls.enabled = true;
-        const back = dir.clone().multiplyScalar(-7);
+        const dist = playerInput.aiming ? 4.5 : 7;
+        const back = dir.clone().multiplyScalar(-dist);
         const desired = p.position.clone().add(back).add(new THREE.Vector3(2.2, 4.2 + playerInput.pitch * -4, 0));
         camera.position.lerp(desired, 0.12);
         if (controls) {
@@ -679,11 +827,14 @@ function initTouchControls() {
         b.addEventListener('touchstart', (e) => {
             const a = b.getAttribute('data-act');
             if (a === 'fire') playerShoot();
+            if (a === 'aim') { playerInput.aiming = !playerInput.aiming; }
             if (a === 'grenade') playerThrowGrenade();
             if (a === 'interact') playerInteract();
             if (a === 'build') toggleBuildMenu();
             if (a === 'heal') playerHealAlly();
             if (a === 'rally') playerRally();
+            if (a === 'tower') toggleTowerMount();
+            if (a === 'help') toggleHelpNPC();
             e.preventDefault();
         }, { passive: false });
     });
