@@ -1146,7 +1146,8 @@
             site.mesh.scale.y = Math.min(1, 0.2 + 0.8 * (site.progress / TOWER_WORK_REQUIRED));
             s.thoughtText = `Construyendo torre ${Math.floor(site.progress)}/${TOWER_WORK_REQUIRED}s`;
             if (site.progress >= TOWER_WORK_REQUIRED) {
-                finishTower(site);
+                if (site.mg && typeof finishMGTower === 'function') finishMGTower(site);
+                else finishTower(site);
                 survivors.forEach(o => { if (o.towerSiteId === site.id) { o.towerSiteId = null; o.towerCommitted = false; } });
             }
             return true;
