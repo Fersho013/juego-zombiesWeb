@@ -84,6 +84,10 @@ function init3DWorld() {
             // Start wave prep timer loop
             startWaveTimer();
             renderSheltersPanel();
+            // Menu inicial: mundo visible de fondo pero pausado hasta JUGAR
+            gameStarted = false;
+            gameSpeed = 0;
+            if (typeof setSpeed === 'function') setSpeed(0);
         }
 
         function onWindowResize() {
@@ -117,6 +121,7 @@ function init3DWorld() {
             gameTime += fixedDelta; // reloj de simulacion
             safeStep('carros', function (d) { if (typeof updateCarts === 'function') updateCarts(d); }, fixedDelta);
             safeStep('supervivientes', updateSurvivorAI, fixedDelta);
+            safeStep('jugador', function (d) { if (typeof updatePlayer === 'function') updatePlayer(d); }, fixedDelta);
             safeStep('zombies', updateZombieAI, fixedDelta);
             safeStep('proyectiles', updateProjectiles, fixedDelta);
             safeStep('apoyo-aereo', function (d) { if (typeof updateAirSupport === 'function') updateAirSupport(d); }, fixedDelta);
@@ -149,12 +154,15 @@ function animate() {
                 stepAccumulator = 0;
             }
 
-            if (cameraMode === 'follow' && survivors[selectedSurvivorIndex]) {
+            const isPlayerCam = (typeof getPlayer === 'function' && getPlayer() && survivors[selectedSurvivorIndex] === getPlayer());
+            if (cameraMode === 'follow' && survivors[selectedSurvivorIndex] && !isPlayerCam) {
                 const s = survivors[selectedSurvivorIndex];
                 controls.target.lerp(s.position, 0.05);
             }
 
-            controls.update();
+            if (!(isPlayerCam && typeof viewMode !== 'undefined' && viewMode === 'fps')) {
+                controls.update();
+            }
             renderer.render(scene, camera);
         }
 
