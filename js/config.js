@@ -94,7 +94,8 @@
         let gameStarted = false; // el mundo 3D no avanza hasta pulsar Jugar
         const customSettings = { zombieMult: 1, prepTime: 180, startResources: 2 };
         let playerIndex = -1; // indice en survivors[] del avatar manual (-1 = sin jugador)
-        const playerInput = { fwd: false, back: false, left: false, right: false, yaw: 0, pitch: -0.25 };
+        const playerInput = { fwd: false, back: false, left: false, right: false, yaw: 0, pitch: -0.25, aiming: false, helpingNPC: false };
+        const CART_DISABLED = true; // carro deshabilitado temporalmente (no funciona)
 
         // ==========================================================
         // ZOMBIE TYPES: básico, mediano y grande
