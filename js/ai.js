@@ -9,7 +9,9 @@
         // ==========================================================
         function getWaveZombieCount(wave) {
             // Escalado infinito: crece con cada oleada sin límite superior
-            return Math.round(45 + wave * 13 + Math.pow(wave, 1.32) * 3);
+            // customSettings.zombieMult permite modo custom (0.5x / 2x)
+            const mult = (typeof customSettings !== 'undefined' && customSettings.zombieMult) ? customSettings.zombieMult : 1;
+            return Math.round((45 + wave * 13 + Math.pow(wave, 1.32) * 3) * mult);
         }
 
         function getWaveTypeMix(wave) {
@@ -244,6 +246,13 @@
 
             survivors.forEach(s => {
                 if (s.health <= 0) { updateFallenSurvivor(s, delta); return; }
+                if (s.isPlayer) {
+                    // Participante: lo mueve updatePlayer(), no la IA.
+                    // Solo enfriamientos + mochila para que disparar/curar funcione.
+                    s.shootCooldown = Math.max(0, s.shootCooldown - delta);
+                    s.grenadeCooldown = Math.max(0, (s.grenadeCooldown || 0) - delta * gameSpeed);
+                    return;
+                }
                 s.hammering = false; // se activa al martillar obra este frame
                 if (s.tankRole) {
                     // Batalla terminada: desembarcar y retomar IA normal en este frame
