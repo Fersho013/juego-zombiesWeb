@@ -86,6 +86,17 @@
         let uiMode = 'pc'; // 'pc' o 'mobile' (elegido en el menu previo)
 
         // ==========================================================
+        // MENU INICIAL / MODO DE JUEGO (menu + participante + custom)
+        // ==========================================================
+        let gameMode = 'spectator'; // 'spectator' | 'participant' | 'custom'
+        let customBaseMode = 'spectator'; // modo base cuando gameMode==='custom'
+        let viewMode = 'tps'; // 'fps' (CoD) | 'tps' (Fortnite) — solo participante/custom-participante
+        let gameStarted = false; // el mundo 3D no avanza hasta pulsar Jugar
+        const customSettings = { zombieMult: 1, prepTime: 180, startResources: 2 };
+        let playerIndex = -1; // indice en survivors[] del avatar manual (-1 = sin jugador)
+        const playerInput = { fwd: false, back: false, left: false, right: false, yaw: 0, pitch: -0.25 };
+
+        // ==========================================================
         // ZOMBIE TYPES: básico, mediano y grande
         // ==========================================================
         const ZOMBIE_TYPES = {
