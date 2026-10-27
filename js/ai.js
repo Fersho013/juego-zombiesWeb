@@ -607,12 +607,17 @@
         }
 
         function aimTowards(entity, targetPos) {
+            if (!entity || !entity.mesh || !targetPos) return;
             const dx = targetPos.x - entity.position.x;
             const dz = targetPos.z - entity.position.z;
+            // Objetivo invalido (muerte en el mismo frame) o encima: no rotar
+            if (!Number.isFinite(dx) || !Number.isFinite(dz)) return;
             if (Math.abs(dx) < 0.001 && Math.abs(dz) < 0.001) return;
             const desiredYaw = Math.atan2(dx, dz);
+            if (!Number.isFinite(desiredYaw)) return;
+            const smoothing = Math.min(1, Math.max(0, frameDelta * 9 * Math.max(1, gameSpeed)));
+            if (!Number.isFinite(smoothing)) return;
             const targetQuat = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), desiredYaw);
-            const smoothing = Math.min(1, frameDelta * 9 * Math.max(1, gameSpeed));
             entity.mesh.quaternion.slerp(targetQuat, smoothing);
         }
 
@@ -1059,7 +1064,8 @@
         function mountTankCrew() {
             const T = tank.unit;
             if (!T || T.crewed) return;
-            const alive = survivors.filter(s => s.health > 0);
+            // El jugador humano NUNCA es reclutado: mantener el control manual
+            const alive = survivors.filter(s => s.health > 0 && !s.isPlayer);
             if (!alive.length) return;
             alive.forEach(s => {
                 s.towerCommitted = false; s.foundCommitted = false; s.tankCommitted = false;
