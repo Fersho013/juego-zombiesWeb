@@ -2017,6 +2017,12 @@
                 z.burned = true;
                 z.mesh.traverse(o => {
                     if (o.isMesh && o.material && o.material.emissive) {
+                        // Los materiales humanoides estan cacheados y son compartidos:
+                        // clonar antes de mutar para que no brillen todos los zombies.
+                        if (!o.userData.burnMaterialCloned) {
+                            o.material = o.material.clone();
+                            o.userData.burnMaterialCloned = true;
+                        }
                         o.material.emissive.setHex(0xcc3300);
                         o.material.emissiveIntensity = 0.7;
                     }
