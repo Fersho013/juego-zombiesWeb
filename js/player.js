@@ -188,6 +188,7 @@ function isParticipantActive() {
 // INPUT PC (WASD + ratón + teclas)
 // ============================================================
 let playerInputBound = false;
+let touchControlsBound = false;
 // Carro deshabilitado temporalmente: no se ofrece ni lo construye la IA (ver CART_DISABLED)
 // mg-tower/turret_*/trap/wall los ejecuta js/outpost.js (quedan FIJOS donde se fundan)
 const BUILD_RECIPES = [
@@ -283,7 +284,8 @@ function initPlayerInput() {
     document.addEventListener('pointerlockchange', () => {
         if (!document.pointerLockElement) playerInput.aiming = false;
     });
-    initTouchControls();
+    // Controles tactiles solo en plataforma movil (en PC no se inyectan eventos)
+    if (uiMode === 'mobile') initTouchControls();
     renderBuildMenu();
     renderWeaponMenu();
     renderInventoryMenu();
@@ -992,34 +994,44 @@ function updatePlayerCamera() {
 }
 
 function initTouchControls() {
+    if (touchControlsBound) return;
     const joy = document.getElementById('touch-joystick');
     const stick = document.getElementById('touch-stick');
     if (!joy || !stick) return;
-    let joyActive = false, joyCX = 0, joyCY = 0;
+    touchControlsBound = true;
+    let joyActive = false, joyCX = 0, joyCY = 0, joyMax = 40;
     joy.addEventListener('touchstart', (e) => {
         joyActive = true;
         const r = joy.getBoundingClientRect();
         joyCX = r.left + r.width / 2; joyCY = r.top + r.height / 2;
+        // Radio maximo segun el tamano real del joystick/pulgar (soporta CSS movil)
+        joyMax = Math.max(10, joy.clientWidth / 2 - stick.offsetWidth / 2);
         e.preventDefault();
     }, { passive: false });
     window.addEventListener('touchmove', (e) => {
         if (!joyActive) return;
         const t = e.touches[0];
+        if (!t) return;
         const dx = t.clientX - joyCX, dy = t.clientY - joyCY;
         const len = Math.max(1, Math.hypot(dx, dy));
-        const cl = Math.min(40, len);
-        stick.style.left = (31 + dx / len * cl) + 'px';
-        stick.style.top = (31 + dy / len * cl) + 'px';
+        const cl = Math.min(joyMax, len);
+        // Centrar el pulgar dinamicamente en cualquier tamano de joystick
+        const restX = joy.clientWidth / 2 - stick.offsetWidth / 2;
+        const restY = joy.clientHeight / 2 - stick.offsetHeight / 2;
+        stick.style.left = (restX + dx / len * cl) + 'px';
+        stick.style.top = (restY + dy / len * cl) + 'px';
         // joystick -> WASD + giro
         playerInput.fwd = dy < -12; playerInput.back = dy > 12;
         playerInput.left = dx < -12; playerInput.right = dx > 12;
         if (Math.abs(dx) > 20) playerInput.yaw -= dx * 0.0006;
     }, { passive: true });
-    window.addEventListener('touchend', () => {
+    const resetJoystick = () => {
         joyActive = false;
-        stick.style.left = '31px'; stick.style.top = '31px';
+        stick.style.left = ''; stick.style.top = '';
         playerInput.fwd = playerInput.back = playerInput.left = playerInput.right = false;
-    });
+    };
+    window.addEventListener('touchend', resetJoystick);
+    window.addEventListener('touchcancel', resetJoystick);
     document.querySelectorAll('#touch-buttons button').forEach(b => {
         b.addEventListener('touchstart', (e) => {
             const a = b.getAttribute('data-act');
