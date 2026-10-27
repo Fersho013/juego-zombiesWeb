@@ -236,18 +236,23 @@
 
         function updateFloatingThoughtBubbles() {
             const container = document.getElementById('thought-bubbles-container');
+            if (!container) return;
             container.innerHTML = '';
+
+            const camDir = camera.getWorldDirection(new THREE.Vector3());
 
             survivors.forEach(s => {
                 if (s.health <= 0) return;
 
                 const tempV = s.position.clone().add(new THREE.Vector3(0, 2.5, 0));
+                // Descartar NPCs a la espalda: su proyeccion saldria invertida
+                if (camera.position.clone().sub(tempV).dot(camDir) > 0) return;
                 tempV.project(camera);
 
                 const x = (tempV.x * .5 + .5) * window.innerWidth;
                 const y = (-(tempV.y * .5) + .5) * window.innerHeight;
 
-                if (tempV.z < 1) {
+                if (tempV.z > -1 && tempV.z < 1) {
                     const bubble = document.createElement('div');
                     bubble.className = 'thought-bubble glass-panel px-2.5 py-1 rounded-xl text-[10px] font-bold text-slate-200 border border-slate-700 shadow-xl flex items-center gap-1.5';
                     bubble.style.left = `${x}px`;
