@@ -5,6 +5,44 @@
  * Variables globales definidas en js/config.js.
  */
 
+// ==========================================================
+// CACHES DE RECURSOS 3D
+// Los humanoides se crean continuamente (cada zombie de cada oleada).
+// Reutilizar geometrias/materiales evita miles de asignaciones y subidas
+// de buffers a la GPU, manteniendo los 60 FPS en movil.
+// IMPORTANTE: ningun sistema debe mutar estos materiales compartidos.
+// El unico que lo hacia (quemado de cadaver en js/ai.js) clona el material
+// antes de tocar su emissive.
+// ==========================================================
+const materialCache = {};
+const basicMaterialCache = {};
+const geometryCache = {};
+
+function getCachedMaterial(color, roughness = 1, metalness = 0) {
+    const key = `${color}-${roughness}-${metalness}`;
+    if (!materialCache[key]) {
+        materialCache[key] = new THREE.MeshStandardMaterial({
+            color: color,
+            roughness: roughness,
+            metalness: metalness
+        });
+    }
+    return materialCache[key];
+}
+
+function getCachedBasicMaterial(color) {
+    const key = `${color}`;
+    if (!basicMaterialCache[key]) {
+        basicMaterialCache[key] = new THREE.MeshBasicMaterial({ color: color });
+    }
+    return basicMaterialCache[key];
+}
+
+function getCachedGeometry(key, factory) {
+    if (!geometryCache[key]) geometryCache[key] = factory();
+    return geometryCache[key];
+}
+
 // TORRETAS DE DEFENSA
         // ==========================================================
         function createTurretModel(improvised) {
@@ -250,23 +288,26 @@
             const group = new THREE.Group();
             group.scale.setScalar(scale);
 
-            const bodyMat = new THREE.MeshStandardMaterial({ color: bodyColor, roughness: 0.6 });
+            const bodyMat = getCachedMaterial(bodyColor, 0.6);
 
-            const torso = new THREE.Mesh(new THREE.CylinderGeometry(0.36, 0.32, 0.9, 8), bodyMat);
+            const torso = new THREE.Mesh(
+                getCachedGeometry('humanoid-torso', () => new THREE.CylinderGeometry(0.36, 0.32, 0.9, 8)),
+                bodyMat
+            );
             torso.position.y = 1.15;
             torso.castShadow = true;
             group.add(torso);
 
-            const headGeo = new THREE.SphereGeometry(0.32, 10, 10);
-            const headMat = new THREE.MeshStandardMaterial({ color: headColor });
+            const headGeo = getCachedGeometry('humanoid-head', () => new THREE.SphereGeometry(0.32, 10, 10));
+            const headMat = getCachedMaterial(headColor, 1.0);
             const head = new THREE.Mesh(headGeo, headMat);
             head.position.y = 1.78;
             head.castShadow = true;
             group.add(head);
 
             if (eyeColor) {
-                const eyeGeo = new THREE.SphereGeometry(0.07, 8, 8);
-                const eyeMat = new THREE.MeshBasicMaterial({ color: eyeColor });
+                const eyeGeo = getCachedGeometry('humanoid-eye', () => new THREE.SphereGeometry(0.07, 8, 8));
+                const eyeMat = getCachedBasicMaterial(eyeColor);
                 const eyeL = new THREE.Mesh(eyeGeo, eyeMat);
                 eyeL.position.set(-0.12, 1.8, 0.26);
                 const eyeR = new THREE.Mesh(eyeGeo, eyeMat);
@@ -283,19 +324,28 @@
                 pivot.position.set(xOffset, isLeg ? 0.75 : 1.5, 0);
                 if (isLeg) {
                     const len = 0.75;
-                    const limbMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.1, len, 6), bodyMat);
+                    const limbMesh = new THREE.Mesh(
+                        getCachedGeometry('humanoid-leg', () => new THREE.CylinderGeometry(0.11, 0.1, len, 6)),
+                        bodyMat
+                    );
                     limbMesh.position.y = -len / 2;
                     limbMesh.castShadow = true;
                     pivot.add(limbMesh);
                 } else {
-                    const upper = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.1, 0.35, 6), bodyMat);
+                    const upper = new THREE.Mesh(
+                        getCachedGeometry('humanoid-arm-upper', () => new THREE.CylinderGeometry(0.11, 0.1, 0.35, 6)),
+                        bodyMat
+                    );
                     upper.position.y = -0.175;
                     upper.castShadow = true;
                     pivot.add(upper);
                     const elbow = new THREE.Group();
                     elbow.position.set(0, -0.35, 0);
                     elbow.rotation.x = -0.25;
-                    const fore = new THREE.Mesh(new THREE.CylinderGeometry(0.10, 0.09, 0.35, 6), bodyMat);
+                    const fore = new THREE.Mesh(
+                        getCachedGeometry('humanoid-arm-fore', () => new THREE.CylinderGeometry(0.10, 0.09, 0.35, 6)),
+                        bodyMat
+                    );
                     fore.position.y = -0.175;
                     fore.castShadow = true;
                     elbow.add(fore);
@@ -315,7 +365,10 @@
             // Se reemplaza por el modelo fisico del arma equipada con refreshWeaponMesh.
             let gun = null;
             if (withGun) {
-                gun = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.15, 0.6), new THREE.MeshStandardMaterial({ color: 0x1e293b }));
+                gun = new THREE.Mesh(
+                    getCachedGeometry('humanoid-gun', () => new THREE.BoxGeometry(0.15, 0.15, 0.6)),
+                    getCachedMaterial(0x1e293b, 1.0)
+                );
                 gun.position.set(0, -0.38, 0.08);
                 gun.name = 'hand-weapon';
                 armR.userData.elbow.add(gun);
