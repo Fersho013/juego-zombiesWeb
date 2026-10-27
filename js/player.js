@@ -314,6 +314,8 @@ function updatePlayer(delta) {
         // Muerto: salir de FPS, mostrar cuerpo y ceder cámara a orbit
         p.mesh.visible = true;
         if (controls) controls.enabled = true;
+        // Restaurar el FOV original de la camara (ADS/FPS dejan 40-62)
+        if (camera.fov !== 45) { camera.fov = 45; camera.updateProjectionMatrix(); }
         exitPlayerGunView();
         if (document.pointerLockElement) { try { document.exitPointerLock(); } catch (e) {} }
         return;
@@ -596,6 +598,13 @@ function closeAllMenus(silent) {
         const el = document.getElementById(id);
         if (el) el.classList.add('hidden');
     });
+    // Evitar que el personaje siga caminando solo si se solto la tecla en el menu
+    playerInput.fwd = false;
+    playerInput.back = false;
+    playerInput.left = false;
+    playerInput.right = false;
+    const p = getPlayer();
+    if (p) p.sprinting = false;
     if (!silent && isParticipantActive() && uiMode !== 'mobile') {
         showToast('Gameplay: click en el mundo para recapturar el mouse.');
     }
