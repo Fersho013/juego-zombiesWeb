@@ -258,3 +258,82 @@ body {
         @media (orientation: portrait) {
             body.mobile-mode #touch-controls { padding-bottom: 110px; }
         }
+
+        /* ==========================================================
+           MODO MOVIL: controles tactiles aislados de la UI de PC
+           ========================================================== */
+        /* En PC los controles tactiles no deben existir; en movil solo
+           aparecen cuando el participante arranca (sin clase .hidden). */
+        body:not(.mobile-mode) #touch-controls,
+        body.mobile-mode #touch-controls.hidden {
+            display: none !important;
+        }
+
+        /* La UI de teclado/raton no se muestra en movil */
+        body.mobile-mode #player-help,
+        body.mobile-mode #player-actions,
+        body.mobile-mode #player-crosshair {
+            display: none !important;
+        }
+
+        /* Barra inferior tactil: mas grande y separada, por encima de los
+           botones de plegado de paneles (que quedan en bottom: 12px). */
+        body.mobile-mode #touch-controls {
+            z-index: 50;
+            padding: 0 12px 64px 12px;
+        }
+
+        body.mobile-mode #touch-joystick {
+            width: 130px;
+            height: 130px;
+            border-radius: 50%;
+            pointer-events: auto;
+            background: rgba(15, 23, 42, 0.6);
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            touch-action: none;
+        }
+
+        body.mobile-mode #touch-stick {
+            width: 52px;
+            height: 52px;
+            left: 37px; /* (126px utiles - 52px) / 2 */
+            top: 37px;
+            background: rgba(239, 68, 68, 0.75);
+        }
+
+        body.mobile-mode #touch-buttons {
+            grid-template-columns: repeat(3, 58px);
+            gap: 10px;
+            pointer-events: auto;
+        }
+
+        body.mobile-mode #touch-buttons button {
+            width: 58px;
+            height: 58px;
+            border-radius: 16px;
+            font-weight: 900;
+            font-size: 18px;
+            background: rgba(15, 23, 42, 0.85);
+            border: 2px solid rgba(255, 255, 255, 0.25);
+            color: #fff;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.5);
+            touch-action: manipulation;
+        }
+
+        body.mobile-mode #touch-buttons button:active {
+            background: rgba(220, 38, 38, 0.75);
+        }
+
+        body.mobile-mode #touch-buttons button[data-act="fire"] {
+            background: rgba(239, 68, 68, 0.85);
+            border-color: #fca5a5;
+            transform: scale(1.1);
+        }
+
+        /* Paneles laterales mas cortos para no tapar los dedos */
+        body.mobile-mode #mobile-panel-left,
+        body.mobile-mode #mobile-panel-right {
+            top: 3.5rem;
+            bottom: 170px;
+        }
+
