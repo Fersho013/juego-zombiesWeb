@@ -142,7 +142,10 @@
             addLogEvent(`¡OLEADA ${currentWave} SUPERADA! Reponiendo suministros...`);
             currentWave++;
             spawnInitialCrates();
-            waveTimer = 180;
+            // Respetar la preparacion elegida en el menu Custom (1:00 / 3:00 / 5:00)
+            waveTimer = (gameMode === 'custom' && customSettings && customSettings.prepTime)
+                ? customSettings.prepTime
+                : 180;
 
             // Reparación parcial de todos los refugios activos tras la oleada
             activeShelterKeys.forEach(k => {
